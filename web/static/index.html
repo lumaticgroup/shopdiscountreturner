@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Discount Bot</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1>Discount Bot</h1>
+      <p class="subtitle" id="subtitle">Sign in to continue</p>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" data-tab="login" role="tab">Log in</button>
+      <button class="tab" data-tab="signup" role="tab">Sign up</button>
+    </nav>
+
+    <form id="form" autocomplete="on">
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" required autocomplete="email" />
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" required minlength="8" autocomplete="current-password" />
+      </label>
+      <label id="confirm-row" hidden>
+        <span>Confirm password</span>
+        <input type="password" name="confirm" minlength="8" autocomplete="new-password" />
+      </label>
+      <button type="submit" id="submit-btn" class="primary">Log in</button>
+      <p id="error" class="error" hidden></p>
+    </form>
+
+    <section id="success" hidden class="success">
+      <p>You're linked. Redirecting to bot…</p>
+      <a id="admin-link" href="/admin.html" hidden>Go to admin panel →</a>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

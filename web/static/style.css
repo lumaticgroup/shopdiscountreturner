@@ -1,0 +1,202 @@
+/* Uses Telegram theme params so the Mini App adapts to light/dark. */
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #111111);
+  --hint: var(--tg-theme-hint-color, #888888);
+  --link: var(--tg-theme-link-color, #2481cc);
+  --btn-bg: var(--tg-theme-button-color, #2481cc);
+  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --section-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
+  --danger: #e5484d;
+  --border: rgba(0, 0, 0, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+main.card {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+header h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+header .subtitle {
+  color: var(--hint);
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--section-bg);
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+.tab {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.tab.is-active {
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--hint);
+}
+form input {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+form input:focus {
+  border-color: var(--link);
+}
+
+button.primary {
+  padding: 13px;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+}
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.success {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--section-bg);
+  border-radius: 10px;
+  text-align: center;
+}
+.success a {
+  color: var(--link);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.store-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+  font-size: 14px;
+}
+.store-table th, .store-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.store-table th {
+  color: var(--hint);
+  font-weight: 500;
+}
+.store-table button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.store-table .danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+textarea {
+  width: 100%;
+  min-height: 160px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.radio-group {
+  display: flex;
+  gap: 12px;
+  padding: 6px 0;
+}
+.radio-group label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.section {
+  margin-top: 24px;
+}
+.section h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn-row .secondary {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--section-bg);
+  color: var(--text);
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+}
