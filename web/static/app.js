@@ -20,7 +20,6 @@ const submitBtn = document.getElementById("submit-btn");
 const errorEl = document.getElementById("error");
 const successEl = document.getElementById("success");
 const adminLink = document.getElementById("admin-link");
-const confirmRow = document.getElementById("confirm-row");
 const subtitle = document.getElementById("subtitle");
 const tabs = document.querySelectorAll(".tab");
 
@@ -31,7 +30,6 @@ for (const tab of tabs) {
     tabs.forEach((t) => t.classList.remove("is-active"));
     tab.classList.add("is-active");
     mode = tab.dataset.tab;
-    confirmRow.hidden = mode !== "signup";
     submitBtn.textContent = mode === "signup" ? "Sign up" : "Log in";
     subtitle.textContent = mode === "signup"
       ? "Create a new account"
@@ -46,12 +44,6 @@ form.addEventListener("submit", async (e) => {
 
   const email = form.email.value.trim();
   const password = form.password.value;
-  const confirm = form.confirm?.value;
-
-  if (mode === "signup" && confirm !== password) {
-    showError("Passwords don't match.");
-    return;
-  }
 
   submitBtn.disabled = true;
   submitBtn.textContent = mode === "signup" ? "Creating…" : "Logging in…";
