@@ -12,6 +12,7 @@ import logging
 
 from telegram import Bot
 from telegram.constants import ParseMode
+from telegram.error import BadRequest, Forbidden
 
 import config
 import db
@@ -19,6 +20,23 @@ from formatters import format_channel_caption
 from scraper.stores import store_for_storefront
 
 logger = logging.getLogger("channel")
+
+
+def _is_permanent_channel_error(err: Exception) -> bool:
+    """
+    Errors that mean "no product will ever post to this channel" — bail out
+    of the whole batch instead of looping and hitting the API N times for
+    the same guaranteed rejection.
+
+    Forbidden: the bot isn't a member/admin of the channel, or was kicked.
+    BadRequest with "chat not found": TELEGRAM_CHANNEL_ID typo'd.
+    """
+    if isinstance(err, Forbidden):
+        return True
+    if isinstance(err, BadRequest):
+        msg = str(err).lower()
+        return "chat not found" in msg or "chat_id is empty" in msg
+    return False
 
 
 async def post_qualifying_deals(bot: Bot) -> int:
@@ -64,6 +82,19 @@ async def post_qualifying_deals(bot: Bot) -> int:
                 )
             message_id = msg.message_id
         except Exception as e:
+            # Some errors are per-product (bad image URL, MarkdownV2 escape
+            # issue in the caption) — we can retry with plain text. Others
+            # (Forbidden: not a member, BadRequest: chat not found) apply to
+            # EVERY candidate and there's no point iterating N times just to
+            # rack up N identical 403s. Abort the whole run in that case.
+            if _is_permanent_channel_error(e):
+                logger.error(
+                    "Channel firehose aborted after 1 attempt: %s. "
+                    "Check that the bot is an ADMIN of %s with post-message "
+                    "permission, and that TELEGRAM_CHANNEL_ID is correct.",
+                    e, config.TELEGRAM_CHANNEL_ID,
+                )
+                return posted
             logger.warning(
                 "send_photo failed for %s/%s (%s) — falling back to text",
                 row["storefront"], row["product_id"], e,
@@ -76,7 +107,15 @@ async def post_qualifying_deals(bot: Bot) -> int:
                     disable_web_page_preview=False,
                 )
                 message_id = msg.message_id
-            except Exception:
+            except Exception as e2:
+                if _is_permanent_channel_error(e2):
+                    logger.error(
+                        "Channel firehose aborted after 1 attempt: %s. "
+                        "Check that the bot is an ADMIN of %s with post-message "
+                        "permission, and that TELEGRAM_CHANNEL_ID is correct.",
+                        e2, config.TELEGRAM_CHANNEL_ID,
+                    )
+                    return posted
                 logger.exception(
                     "Channel post failed for %s/%s",
                     row["storefront"], row["product_id"],

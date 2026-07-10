@@ -45,6 +45,23 @@ async def fetch_category(
         if not items:
             break
 
+        # One-shot diagnostic: log the image-related keys of the first item
+        # on the very first page we see, so we can confirm which shape
+        # Trendyol is returning today. Cheap (once per scrape), invaluable
+        # when the CDN schema drifts.
+        if page_idx == 1 and items and not seen:
+            first = items[0]
+            image_keys = {
+                k: first.get(k)
+                for k in ("imageUrl", "images", "image", "stampsImageUrl",
+                          "landingImageUrl", "productImageUrl")
+                if k in first
+            }
+            logger.info(
+                "Trendyol item image-keys sample (%s): %s",
+                category_breadcrumb, image_keys,
+            )
+
         new_count = 0
         for item in items:
             product = _to_product(item, storefront)
@@ -104,7 +121,7 @@ def _to_product(item: dict, sf: Storefront) -> Optional[models.ScrapedProduct]:
         name=(item.get("name") or "Unknown")[:200],
         url=url,
         brand=brand,
-        image_url=item.get("imageUrl"),
+        image_url=_extract_image_url(item),
         price=sale_f,
         original_price=was_f,
         discount_pct=discount_pct,
@@ -112,3 +129,54 @@ def _to_product(item: dict, sf: Storefront) -> Optional[models.ScrapedProduct]:
         category_id=None,
         is_outlet=False,
     )
+
+
+# Trendyol's CDN. Image `path` fields in the API payload are typically
+# relative to this host (e.g. "/ty123/product/media/image.jpg").
+_CDN_BASE = "https://cdn.dsmcdn.com"
+
+
+def _extract_image_url(item: dict) -> Optional[str]:
+    """
+    Trendyol's search API is inconsistent about how it returns product
+    images. Seen shapes, in order of frequency:
+      - item["imageUrl"] = "https://cdn.dsmcdn.com/..."          (rare/legacy)
+      - item["images"]   = ["/ty123/product/media/x.jpg", ...]   (strings)
+      - item["images"]   = [{"path": "/ty123/..."}, ...]         (dicts)
+      - item["image"]    = "/ty123/..."
+      - item["stampsImageUrl"] / "landingImageUrl" / "productImageUrl"
+    We probe every shape and return the first absolute URL. Returns None
+    if nothing usable is found (channel post then falls back to text-only).
+    """
+    candidate = item.get("imageUrl")
+    if isinstance(candidate, str) and candidate.strip():
+        return _absolutise(candidate)
+
+    imgs = item.get("images")
+    if isinstance(imgs, list) and imgs:
+        first = imgs[0]
+        if isinstance(first, str) and first.strip():
+            return _absolutise(first)
+        if isinstance(first, dict):
+            for key in ("path", "url", "src", "imageUrl"):
+                v = first.get(key)
+                if isinstance(v, str) and v.strip():
+                    return _absolutise(v)
+
+    for key in ("image", "stampsImageUrl", "landingImageUrl", "productImageUrl"):
+        v = item.get(key)
+        if isinstance(v, str) and v.strip():
+            return _absolutise(v)
+
+    return None
+
+
+def _absolutise(path_or_url: str) -> str:
+    """Turn `/ty123/product/…` into `https://cdn.dsmcdn.com/ty123/product/…`."""
+    if path_or_url.startswith(("http://", "https://")):
+        return path_or_url
+    if path_or_url.startswith("//"):
+        return "https:" + path_or_url
+    if path_or_url.startswith("/"):
+        return _CDN_BASE + path_or_url
+    return _CDN_BASE + "/" + path_or_url

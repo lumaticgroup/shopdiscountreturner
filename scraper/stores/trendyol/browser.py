@@ -244,13 +244,25 @@ class PlaywrightSession:
             ) from e
         home_url = sf.base_url + (sf.home_path or "/")
         logger.info("Warming %s at %s", sf.code, home_url)
-        await page.goto(home_url, wait_until="domcontentloaded", timeout=45000)
-        # Give the SSR-injected globals a moment to attach.
-        await page.wait_for_timeout(1500)
-
-        nav_props = await page.evaluate(
-            "() => window['__navigation__PROPS'] || null"
-        )
+        try:
+            await page.goto(home_url, wait_until="domcontentloaded", timeout=45000)
+            # Give the SSR-injected globals a moment to attach.
+            await page.wait_for_timeout(1500)
+            nav_props = await page.evaluate(
+                "() => window['__navigation__PROPS'] || null"
+            )
+        except Exception as e:
+            # TargetClosedError at goto/evaluate = Chromium OOM-killed while
+            # parsing the Trendyol homepage. Same diagnostic as new_page.
+            _log_memory_state("at TargetClosed during goto")
+            limit = _read_cgroup_mem_limit()
+            limit_str = f"{limit // (1024 * 1024)} MB" if limit else "no cgroup limit"
+            raise ChromiumDied(
+                f"Chromium died while loading the storefront homepage "
+                f"({type(e).__name__}: {e}). Container memory limit is "
+                f"{limit_str}. Trendyol scraping needs ≥1 GB RAM; bump the "
+                f"justrunmy.app plan or use a prescraped DB for the demo."
+            ) from e
         self._pages[sf.code] = page
         return nav_props or {}
 
