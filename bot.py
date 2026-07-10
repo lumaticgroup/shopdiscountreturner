@@ -71,8 +71,20 @@ def _is_admin(chat_id: int) -> bool:
 
 
 def _webapp_url(path: str = "/") -> str:
-    base = (config.WEBAPP_BASE_URL or "").rstrip("/")
+    """
+    Build a Mini App URL. Returns "" when WEBAPP_BASE_URL is unset OR isn't
+    a valid HTTPS origin — Telegram rejects anything else with
+      "Inline keyboard button web app url … is invalid: only https links are allowed"
+    We collapse the misconfigured case to empty so callers hit the
+    "Mini App isn't configured" fallback instead of raising BadRequest at
+    Telegram send time.
+    """
+    base = (config.WEBAPP_BASE_URL or "").strip().rstrip("/")
     if not base:
+        return ""
+    # Only https:// is accepted by Telegram Mini Apps. http and bare hostnames
+    # (`localhost`, `myhost.local`) fail with a 400 on sendMessage.
+    if not base.lower().startswith("https://"):
         return ""
     return base + path
 
@@ -624,6 +636,21 @@ async def _run_bot_and_webapp() -> None:
         config.WEBAPP_HOST, config.WEBAPP_PORT,
         config.WEBAPP_BASE_URL or "<unset>",
     )
+    # Telegram Mini Apps only accept https:// button URLs. Warn loudly on
+    # boot so misconfig is obvious in the logs, not discovered when a user
+    # hits /start and gets a 400 from sendMessage.
+    if config.WEBAPP_BASE_URL and not config.WEBAPP_BASE_URL.strip().lower().startswith("https://"):
+        logger.warning(
+            "WEBAPP_BASE_URL=%r is not an https:// URL — Mini App buttons are "
+            "disabled. Set it to your public https origin (e.g. "
+            "https://your-app.justrunmy.app).",
+            config.WEBAPP_BASE_URL,
+        )
+    elif not config.WEBAPP_BASE_URL:
+        logger.warning(
+            "WEBAPP_BASE_URL is unset — /start will tell users the Mini App "
+            "isn't configured. Set it in the deploy dashboard env.",
+        )
 
     await app.initialize()
     await app.start()
