@@ -69,7 +69,22 @@ class PlaywrightSession:
     async def __aenter__(self):
         from playwright.async_api import async_playwright
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(headless=self._headless)
+        # `--disable-dev-shm-usage` moves renderer shared memory from the
+        # kernel's /dev/shm (often only 64 MB in containers, causing renderer
+        # crashes) into /tmp. `--no-sandbox` and `--disable-setuid-sandbox`
+        # are needed because most container runtimes (justrunmy.app included)
+        # don't grant the caps Chromium's sandbox needs. Without these three,
+        # Chromium dies right after context creation with
+        #   "Target page, context or browser has been closed".
+        self._browser = await self._pw.chromium.launch(
+            headless=self._headless,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
