@@ -335,6 +335,11 @@ def set_user_role(user_id: int, role: str) -> None:
         c.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
 
 
+def set_user_password(user_id: int, password_hash: str) -> None:
+    with _conn() as c:
+        c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+
+
 def count_admins() -> int:
     with _conn() as c:
         r = c.execute("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").fetchone()

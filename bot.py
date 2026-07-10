@@ -601,11 +601,8 @@ async def _run_bot_and_webapp() -> None:
     result = bootstrap_admin_if_needed()
     if result == "created":
         logger.info("Seeded first admin from BOOTSTRAP_ADMIN_EMAIL")
-    elif result == "email_taken":
-        logger.warning(
-            "BOOTSTRAP_ADMIN_EMAIL is already used by a non-admin user; "
-            "skipping seed. Promote manually if needed."
-        )
+    elif result == "password_synced":
+        logger.info("Re-synced admin password/role from env")
 
     _load_env_stores_into_db()
     refresh_dynamic_stores()

@@ -31,6 +31,7 @@ from .sqlite_backend import (
     role_for_chat,
     search_products,
     set_storefront_pref,
+    set_user_password,
     set_user_role,
     top_discounts,
     upsert_category,
@@ -69,6 +70,7 @@ __all__ = [
     "create_user",
     "get_user_by_email",
     "get_user",
+    "set_user_password",
     "set_user_role",
     "count_admins",
     # sessions

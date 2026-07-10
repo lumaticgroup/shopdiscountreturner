@@ -23,26 +23,35 @@ logger = logging.getLogger("bootstrap_admin")
 
 def bootstrap_admin_if_needed() -> str:
     """
-    Returns one of: 'created', 'admin_exists', 'skipped_no_env',
-    'email_taken'. Safe to call every startup.
+    Ensure the env-declared admin exists AND matches the env password.
+
+    Env is the source of truth: on every startup we either create the admin
+    or re-sync its password/role from BOOTSTRAP_ADMIN_PASSWORD. This lets an
+    operator recover a forgotten password by changing the env var and
+    restarting, without touching the DB.
+
+    Returns one of: 'created', 'password_synced', 'up_to_date',
+    'skipped_no_env'.
     """
     if not config.BOOTSTRAP_ADMIN_EMAIL or not config.BOOTSTRAP_ADMIN_PASSWORD:
         return "skipped_no_env"
 
-    if db.count_admins() > 0:
-        return "admin_exists"
-
     existing = db.get_user_by_email(config.BOOTSTRAP_ADMIN_EMAIL)
-    if existing:
-        # Someone signed up with that email as a customer first — promote.
-        if existing["role"] != "admin":
-            db.set_user_role(existing["id"], "admin")
-            return "created"
-        return "admin_exists"
-
     pwd_hash = bcrypt.hash(config.BOOTSTRAP_ADMIN_PASSWORD)
-    db.create_user(config.BOOTSTRAP_ADMIN_EMAIL, pwd_hash, role="admin")
-    return "created"
+
+    if existing is None:
+        db.create_user(config.BOOTSTRAP_ADMIN_EMAIL, pwd_hash, role="admin")
+        return "created"
+
+    changed = False
+    if existing["role"] != "admin":
+        db.set_user_role(existing["id"], "admin")
+        changed = True
+    if not bcrypt.verify(config.BOOTSTRAP_ADMIN_PASSWORD, existing["password_hash"]):
+        db.set_user_password(existing["id"], pwd_hash)
+        changed = True
+
+    return "password_synced" if changed else "up_to_date"
 
 
 def main():
@@ -55,16 +64,10 @@ def main():
 
     if result == "created":
         print(f"OK — admin {config.BOOTSTRAP_ADMIN_EMAIL!r} created.")
-    elif result == "admin_exists":
-        print("OK — an admin already exists, nothing to do.")
-    elif result == "email_taken":
-        print(
-            f"ERROR — email {config.BOOTSTRAP_ADMIN_EMAIL!r} is already used "
-            "by a non-admin account. Promote them manually with SQL or a "
-            "future /api/admin/users route.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    elif result == "password_synced":
+        print(f"OK — admin {config.BOOTSTRAP_ADMIN_EMAIL!r} re-synced from env.")
+    elif result == "up_to_date":
+        print("OK — admin already in sync with env, nothing to do.")
     elif result == "skipped_no_env":
         print(
             "SKIPPED — set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD "
