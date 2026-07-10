@@ -31,6 +31,74 @@ _USER_AGENT = (
     "Chrome/130.0.0.0 Safari/537.36"
 )
 
+
+class ChromiumDied(RuntimeError):
+    """
+    Raised when Chromium is killed by the host between launch and first page
+    creation. On container hosts (justrunmy.app, Fly, small Docker) this is
+    almost always OOM. Message carries the memory snapshot so operators see
+    the exact numbers in the log and in the /discounts UI reply.
+    """
+
+
+def _read_meminfo() -> dict:
+    """Best-effort snapshot from /proc/meminfo. Returns {} off-Linux."""
+    try:
+        with open("/proc/meminfo") as f:
+            out = {}
+            for line in f:
+                k, _, rest = line.partition(":")
+                val = rest.strip().split()
+                if val and val[0].isdigit():
+                    out[k.strip()] = int(val[0])  # kB
+            return out
+    except OSError:
+        return {}
+
+
+def _read_cgroup_mem_limit() -> Optional[int]:
+    """
+    Return the container's memory limit in bytes, or None if not
+    cgroup-limited. Tries cgroup v2 first, falls back to v1.
+    """
+    for path in (
+        "/sys/fs/cgroup/memory.max",                    # v2
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # v1
+    ):
+        try:
+            with open(path) as f:
+                raw = f.read().strip()
+            if raw == "max":
+                return None
+            n = int(raw)
+            # v1 uses a huge sentinel value for "unlimited"; anything > 1 TB
+            # isn't a real container limit.
+            if n > (1 << 40):
+                return None
+            return n
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _log_memory_state(where: str) -> None:
+    """
+    Log a short RAM snapshot so OOM kills are self-diagnosable from the log
+    alone. No-op if we can't read /proc (macOS dev boxes).
+    """
+    mi = _read_meminfo()
+    if not mi:
+        return
+    limit = _read_cgroup_mem_limit()
+    total_mb = mi.get("MemTotal", 0) // 1024
+    avail_mb = mi.get("MemAvailable", 0) // 1024
+    limit_mb = (limit or 0) // (1024 * 1024)
+    logger.info(
+        "mem %s: available=%d MB, host_total=%d MB, cgroup_limit=%s",
+        where, avail_mb, total_mb,
+        f"{limit_mb} MB" if limit else "none",
+    )
+
 # JS body of the in-browser fetch. Runs inside the page context, so
 # Cloudflare sees the real browser TLS fingerprint and cookie jar.
 _FETCH_JS = """
@@ -69,13 +137,22 @@ class PlaywrightSession:
     async def __aenter__(self):
         from playwright.async_api import async_playwright
         self._pw = await async_playwright().start()
-        # `--disable-dev-shm-usage` moves renderer shared memory from the
-        # kernel's /dev/shm (often only 64 MB in containers, causing renderer
-        # crashes) into /tmp. `--no-sandbox` and `--disable-setuid-sandbox`
-        # are needed because most container runtimes (justrunmy.app included)
-        # don't grant the caps Chromium's sandbox needs. Without these three,
-        # Chromium dies right after context creation with
-        #   "Target page, context or browser has been closed".
+        _log_memory_state("before chromium launch")
+        # Container-safe Chromium flags. Notes on why each one is here:
+        #   --no-sandbox / --disable-setuid-sandbox: most container runtimes
+        #     (justrunmy.app included) don't grant Chromium's sandbox caps.
+        #   --disable-dev-shm-usage: /dev/shm is often 64 MB in containers,
+        #     which kills the renderer.
+        #   --single-process: all Chromium subsystems in one OS process. Uses
+        #     LESS total RAM in tiny containers (no per-tab renderer fork).
+        #     Trade-off: slower and less stable, but on <=1 GB plans this is
+        #     the difference between "works" and "OOM-killed".
+        #   --renderer-process-limit=1: enforce it even if --single-process
+        #     is somehow ignored.
+        #   --disable-features=Translate,BackForwardCache,...: shave background
+        #     memory.
+        #   --js-flags=--max-old-space-size=256: cap V8 heap so we don't push
+        #     over the container limit warming a single page.
         self._browser = await self._pw.chromium.launch(
             headless=self._headless,
             args=[
@@ -83,8 +160,18 @@ class PlaywrightSession:
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--single-process",
+                "--no-zygote",
+                "--renderer-process-limit=1",
+                "--disable-features=Translate,BackForwardCache,IsolateOrigins,site-per-process",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--disable-extensions",
+                "--js-flags=--max-old-space-size=256",
             ],
+            chromium_sandbox=False,
         )
+        _log_memory_state("after chromium launch")
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -111,10 +198,23 @@ class PlaywrightSession:
 
         Returns {} if the state blob is missing.
         """
+        # Smaller viewport = smaller raster = less RAM. We only need
+        # __navigation__PROPS anyway, not visual fidelity.
         ctx = await self._browser.new_context(
             user_agent=_USER_AGENT,
-            viewport={"width": 1440, "height": 900},
+            viewport={"width": 800, "height": 600},
+            java_script_enabled=True,
+            bypass_csp=True,
         )
+        # Block images/media/fonts — they're the biggest contributors to
+        # renderer RAM on a homepage load. Trendyol still injects the JS
+        # state blob we need without them.
+        async def _block(route):
+            if route.request.resource_type in ("image", "media", "font"):
+                await route.abort()
+            else:
+                await route.continue_()
+        await ctx.route("**/*", _block)
         await ctx.add_cookies([
             {"name": "storefrontId", "value": str(sf.storefront_id),
              "domain": ".trendyol.com", "path": "/"},
@@ -127,7 +227,21 @@ class PlaywrightSession:
             {"name": "AZ_SELECTED", "value": "true",
              "domain": ".trendyol.com", "path": "/"},
         ])
-        page = await ctx.new_page()
+        try:
+            page = await ctx.new_page()
+        except Exception as e:
+            # Almost always Chromium was OOM-killed between new_context and
+            # new_page. Surface a diagnostic message that names the cause so
+            # /discounts shows something actionable instead of "Scrape failed".
+            _log_memory_state("at TargetClosed")
+            limit = _read_cgroup_mem_limit()
+            limit_str = f"{limit // (1024 * 1024)} MB" if limit else "no cgroup limit"
+            raise ChromiumDied(
+                f"Chromium died before a page could be opened "
+                f"({type(e).__name__}: {e}). Container memory limit is "
+                f"{limit_str}. Trendyol scraping needs ≥1 GB RAM; bump the "
+                f"justrunmy.app plan or use a prescraped DB for the demo."
+            ) from e
         home_url = sf.base_url + (sf.home_path or "/")
         logger.info("Warming %s at %s", sf.code, home_url)
         await page.goto(home_url, wait_until="domcontentloaded", timeout=45000)

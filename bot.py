@@ -310,11 +310,23 @@ async def discounts_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await channel.post_qualifying_deals(context.bot)
                 except Exception:
                     logger.exception("Channel firehose failed")
-            except Exception:
+            except Exception as e:
                 logger.exception("Scrape failed")
-                await update.effective_message.reply_text(
-                    "Scrape failed — check server logs. Showing whatever is already cached."
-                )
+                # Surface the actual failure reason to the user instead of
+                # the generic "check server logs" — for the Trendyol flow
+                # that's almost always Chromium OOM on small containers.
+                from scraper.stores.trendyol.browser import ChromiumDied
+                if isinstance(e, ChromiumDied):
+                    msg = (
+                        "Live scrape failed: Chromium was killed by the host.\n\n"
+                        f"{e}\n\nShowing cached results if any exist."
+                    )
+                else:
+                    msg = (
+                        f"Scrape failed ({type(e).__name__}). See server logs. "
+                        "Showing whatever is already cached."
+                    )
+                await update.effective_message.reply_text(msg)
 
     products = db.top_discounts(sf, limit=config.DIGEST_TOP_N)
     await update.effective_message.reply_text(
