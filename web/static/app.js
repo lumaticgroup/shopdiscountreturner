@@ -107,10 +107,9 @@ function showSuccess(role) {
   form.hidden = true;
   document.querySelector(".tabs").hidden = true;
   successEl.hidden = false;
-  if (role === "admin") {
-    adminLink.hidden = false;
-    // Admins may want to go straight to store management, so we don't auto-close.
-  } else {
-    setTimeout(() => tg?.close?.(), 1400);
-  }
+  // Everyone — including admins — bounces back to the bot chat after login.
+  // Admin-only actions (Publish, Add store) are surfaced there via the
+  // inline welcome keyboard, so we don't need to shove the admin panel in
+  // front of them here. They can still open /admin.html manually.
+  setTimeout(() => tg?.close?.(), 1400);
 }
