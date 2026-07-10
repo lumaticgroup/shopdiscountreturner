@@ -1,0 +1,40 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# VCS + editor junk
+.git
+.gitignore
+.github
+.idea
+.
+.vscode
+.DS_Store
+
+# Local envs / caches
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+
+# Local data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Tests & docs (not needed at runtime)
+tests
+*.md
+!README.md
+
+# Deploy artifacts
+scripts/deploy_*.sh
+Dockerfile
+.dockerignore
