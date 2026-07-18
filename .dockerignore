@@ -8,9 +8,10 @@
 .gitignore
 .github
 .idea
-.
 .vscode
 .DS_Store
+.claude
+.kiro
 
 # Local envs / caches
 .venv
