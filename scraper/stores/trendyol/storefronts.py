@@ -22,9 +22,9 @@ class TrendyolStorefront(Storefront):
 
 
 STOREFRONTS: dict[str, TrendyolStorefront] = {
-    "tr": TrendyolStorefront(
-        code="tr",
-        display_name="Turkey",
+    "trendyol_tr": TrendyolStorefront(
+        code="trendyol_tr",
+        display_name="Trendyol Turkey",
         currency="TL",
         store_code=_STORE_CODE,
         base_url="https://www.trendyol.com",
@@ -34,11 +34,9 @@ STOREFRONTS: dict[str, TrendyolStorefront] = {
         language="tr",
         culture="tr-TR",
     ),
-    # "gulf" retained as CLI/DB code for backwards compatibility with
-    # existing DB rows and bot commands. It now points at the UAE storefront.
-    "gulf": TrendyolStorefront(
-        code="gulf",
-        display_name="UAE",
+    "trendyol_uae": TrendyolStorefront(
+        code="trendyol_uae",
+        display_name="Trendyol UAE",
         currency="AED",
         store_code=_STORE_CODE,
         base_url="https://www.trendyol.com",
@@ -50,8 +48,16 @@ STOREFRONTS: dict[str, TrendyolStorefront] = {
     ),
 }
 
+# Pre-multi-store codes still present in old DBs and .env files. init_db()
+# rewrites DB rows via this map; get() accepts them for stray callers.
+LEGACY_CODES: dict[str, str] = {
+    "tr": "trendyol_tr",
+    "gulf": "trendyol_uae",
+}
+
 
 def get(code: str) -> TrendyolStorefront:
+    code = LEGACY_CODES.get(code, code)
     if code not in STOREFRONTS:
         raise ValueError(f"Unknown Trendyol storefront '{code}'. Known: {list(STOREFRONTS)}")
     return STOREFRONTS[code]

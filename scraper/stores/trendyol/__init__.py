@@ -1,6 +1,6 @@
 """
-Trendyol store module. Owns the `tr` (Turkey/TL) and `gulf` (UAE/AED)
-storefronts. Flow class: Cloudflare-gated, no public API — we warm a
+Trendyol store module. Owns the `trendyol_tr` (Turkey/TL) and
+`trendyol_uae` (UAE/AED) storefronts. Flow class: Cloudflare-gated, no public API — we warm a
 Playwright browser context and call the internal search API through
 `page.evaluate(fetch(...))`. See browser.py, categories.py, api.py.
 """
@@ -13,6 +13,7 @@ import db
 from scraper.base import Storefront, StoreScraper
 
 from . import api, browser, categories as cat_mod
+from .storefronts import LEGACY_CODES as LEGACY_STOREFRONT_CODES  # noqa: F401 — picked up by registry discovery
 from .storefronts import STOREFRONTS as _TR_STOREFRONTS
 
 logger = logging.getLogger("scraper.trendyol")

@@ -27,6 +27,11 @@ logger = logging.getLogger("scraper.stores")
 STORES: dict[str, StoreScraper] = {}
 STOREFRONTS: dict[str, Storefront] = {}
 
+# Renamed storefront codes → current codes, aggregated from each store
+# package's optional `LEGACY_STOREFRONT_CODES` attribute. Lets stray
+# callers (old inline-keyboard buttons, stale .env values) keep working.
+LEGACY_STOREFRONT_CODES: dict[str, str] = {}
+
 # Snapshot of statically-discovered stores. Anything in STORES not in
 # _STATIC_CODES was added by `refresh_dynamic_stores`, so we know exactly
 # what to drop on the next refresh.
@@ -59,6 +64,9 @@ def _discover() -> None:
                     f"(second sighting in store {store.code!r})"
                 )
             STOREFRONTS[sf.code] = sf
+        LEGACY_STOREFRONT_CODES.update(
+            getattr(module, "LEGACY_STOREFRONT_CODES", {})
+        )
 
 
 _discover()
@@ -134,6 +142,9 @@ def refresh_dynamic_stores() -> int:
         loaded += 1
 
     logger.info("Dynamic store refresh: %d loaded", loaded)
+    # Keep the DB's storefronts table (FK target for products/categories)
+    # in step with the registry after every reload.
+    db.sync_storefronts()
     return loaded
 
 
@@ -144,6 +155,7 @@ def get_store(code: str) -> StoreScraper:
 
 
 def get_storefront(code: str) -> Storefront:
+    code = LEGACY_STOREFRONT_CODES.get(code, code)
     if code not in STOREFRONTS:
         raise ValueError(
             f"Unknown storefront '{code}'. Known: {list(STOREFRONTS)}"
@@ -163,6 +175,7 @@ def all_storefronts() -> Iterator[Storefront]:
 __all__ = [
     "STORES",
     "STOREFRONTS",
+    "LEGACY_STOREFRONT_CODES",
     "get_store",
     "get_storefront",
     "store_for_storefront",

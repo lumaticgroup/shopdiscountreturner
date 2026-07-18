@@ -19,7 +19,7 @@ from typing import ClassVar
 
 @dataclass(frozen=True)
 class Storefront:
-    code: str            # unique across ALL stores: "tr", "gulf", "amazon_de", …
+    code: str            # unique across ALL stores: "trendyol_tr", "shein_uae", "amazon_de", …
     display_name: str
     currency: str
     store_code: str      # points at owning StoreScraper.code

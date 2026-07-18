@@ -47,7 +47,7 @@ __all__ = [
 ]
 
 
-# CLI entry: `python -m scraper --storefront tr [--dry-run]`
+# CLI entry: `python -m scraper --storefront trendyol_tr [--dry-run]`
 def _cli():
     import argparse
     import logging as _lg
@@ -58,7 +58,8 @@ def _cli():
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--storefront", default="tr", choices=list(STOREFRONTS.keys()))
+    ap.add_argument("--storefront", default="trendyol_tr",
+                    choices=list(STOREFRONTS.keys()))
     ap.add_argument("--max-pages", type=int, default=5)
     ap.add_argument("--concurrency", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true")

@@ -28,6 +28,70 @@ def _conn():
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA_PATH.read_text())
+    _migrate_legacy_storefronts()
+    sync_storefronts()
+
+
+# Pre-multi-store storefront codes → namespaced codes. Old DBs carry the
+# short codes in every storefront-keyed table; rewrite them once on startup.
+_LEGACY_STOREFRONT_CODES = {"tr": "trendyol_tr", "gulf": "trendyol_uae"}
+
+_STOREFRONT_COLUMNS = (
+    ("categories", "storefront"),
+    ("products", "storefront"),
+    ("price_history", "storefront"),
+    ("channel_posts", "storefront"),
+    ("subscribers", "storefront_pref"),
+    ("user_prefs", "storefront_pref"),
+)
+
+
+def _migrate_legacy_storefronts() -> None:
+    """
+    One-shot rewrite of legacy codes across all storefront-keyed tables.
+    Runs on a dedicated FK-OFF connection because parent (`storefronts`) and
+    child rows change in one pass. `UPDATE OR IGNORE` + delete-leftovers
+    keeps it idempotent even if a row already exists under the new code.
+    """
+    c = sqlite3.connect(config.DB_PATH)
+    try:
+        present = {
+            r[0] for r in c.execute("SELECT code FROM storefronts").fetchall()
+        }
+        if not (present & set(_LEGACY_STOREFRONT_CODES)):
+            return
+        for old, new in _LEGACY_STOREFRONT_CODES.items():
+            for table, col in _STOREFRONT_COLUMNS:
+                c.execute(
+                    f"UPDATE OR IGNORE {table} SET {col} = ? WHERE {col} = ?",
+                    (new, old),
+                )
+                c.execute(f"DELETE FROM {table} WHERE {col} = ?", (old,))
+            c.execute("DELETE FROM storefronts WHERE code = ?", (old,))
+        c.commit()
+    finally:
+        c.close()
+
+
+def sync_storefronts() -> None:
+    """
+    Upsert one `storefronts` row per registry storefront so the FK target
+    exists for every store's products/categories — static stores at
+    init_db(), dynamic ones again after refresh_dynamic_stores().
+    """
+    from scraper.stores import all_storefronts  # local import: db loads first
+
+    with _conn() as c:
+        for sf in all_storefronts():
+            c.execute(
+                """INSERT INTO storefronts (code, base_url, currency, display_name)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(code) DO UPDATE SET
+                       base_url = excluded.base_url,
+                       currency = excluded.currency,
+                       display_name = excluded.display_name""",
+                (sf.code, getattr(sf, "base_url", ""), sf.currency, sf.display_name),
+            )
 
 
 # ---------- Categories ----------
@@ -230,9 +294,10 @@ def list_subscribers() -> list[dict]:
     with _conn() as c:
         rows = c.execute(
             """SELECT s.chat_id,
-                      COALESCE(u.storefront_pref, s.storefront_pref, 'tr') AS storefront_pref
+                      COALESCE(u.storefront_pref, s.storefront_pref, ?) AS storefront_pref
                  FROM subscribers s
                  LEFT JOIN user_prefs u ON u.chat_id = s.chat_id""",
+            (config.DEFAULT_STOREFRONT,),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -242,7 +307,7 @@ def get_storefront_pref(chat_id: int) -> str:
         r = c.execute(
             "SELECT storefront_pref FROM user_prefs WHERE chat_id = ?", (chat_id,)
         ).fetchone()
-        return r["storefront_pref"] if r else "tr"
+        return r["storefront_pref"] if r else config.DEFAULT_STOREFRONT
 
 
 def set_storefront_pref(chat_id: int, storefront: str) -> None:

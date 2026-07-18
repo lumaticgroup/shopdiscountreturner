@@ -5,9 +5,13 @@ CREATE TABLE IF NOT EXISTS storefronts (
     display_name TEXT NOT NULL
 );
 
+-- Static seed for fresh DBs. init_db() then syncs this table from the
+-- store registry (sync_storefronts), so dynamic/env stores get rows too.
 INSERT OR IGNORE INTO storefronts (code, base_url, currency, display_name) VALUES
-    ('tr',   'https://www.trendyol.com',       'TL',  'Turkey'),
-    ('gulf', 'https://www.trendyol.com/sa-en', 'AED', 'Gulf');
+    ('trendyol_tr',  'https://www.trendyol.com',    'TL',  'Trendyol Turkey'),
+    ('trendyol_uae', 'https://www.trendyol.com/en', 'AED', 'Trendyol UAE'),
+    ('shein_tr',     'https://tr.shein.com',        'TL',  'Shein Turkey'),
+    ('shein_uae',    'https://ar.shein.com',        'AED', 'Shein UAE');
 
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY,
@@ -57,13 +61,13 @@ CREATE INDEX IF NOT EXISTS idx_history_product ON price_history(storefront, prod
 
 CREATE TABLE IF NOT EXISTS subscribers (
     chat_id INTEGER PRIMARY KEY,
-    storefront_pref TEXT DEFAULT 'tr' REFERENCES storefronts(code),
+    storefront_pref TEXT DEFAULT 'trendyol_tr' REFERENCES storefronts(code),
     subscribed_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_prefs (
     chat_id INTEGER PRIMARY KEY,
-    storefront_pref TEXT NOT NULL DEFAULT 'tr' REFERENCES storefronts(code)
+    storefront_pref TEXT NOT NULL DEFAULT 'trendyol_tr' REFERENCES storefronts(code)
 );
 
 -- Tracks products already posted to the ≥N% Telegram channel firehose so

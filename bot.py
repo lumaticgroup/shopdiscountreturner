@@ -37,7 +37,12 @@ from formatters import (
     format_product_list,
 )
 from scraper import scrape_storefront
-from scraper.stores import STOREFRONTS, get_storefront, store_for_storefront
+from scraper.stores import (
+    LEGACY_STOREFRONT_CODES,
+    STOREFRONTS,
+    get_storefront,
+    store_for_storefront,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,9 +58,14 @@ _last_scrape_at: dict[str, float] = {}
 
 def _user_storefront(chat_id: int) -> str:
     try:
-        return db.get_storefront_pref(chat_id)
+        pref = db.get_storefront_pref(chat_id)
     except Exception:
         return config.DEFAULT_STOREFRONT
+    # Prefs can outlive their storefront (store removed/disabled) — fall
+    # back rather than erroring every command for that user.
+    if pref not in STOREFRONTS:
+        return config.DEFAULT_STOREFRONT
+    return pref
 
 
 def _storefront_display(code: str) -> str:
@@ -387,6 +397,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("sf:"):
         code = data[3:]
+        # Buttons in pre-rename chat messages still carry the old codes.
+        code = LEGACY_STOREFRONT_CODES.get(code, code)
         if code in STOREFRONTS:
             db.set_storefront_pref(chat_id, code)
             await q.edit_message_text(

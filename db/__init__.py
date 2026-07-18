@@ -33,6 +33,7 @@ from .sqlite_backend import (
     set_storefront_pref,
     set_user_password,
     set_user_role,
+    sync_storefronts,
     top_discounts,
     upsert_category,
     upsert_dynamic_store,
@@ -43,6 +44,7 @@ from .sqlite_backend import (
 __all__ = [
     # core
     "init_db",
+    "sync_storefronts",
     # categories
     "upsert_category",
     "list_top_categories",

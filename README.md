@@ -47,11 +47,11 @@ cp .env.example .env
 
 ```bash
 # 1. Diagnostic (optional): confirm we can reach a storefront
-python -m scripts.inspect_page --storefront tr
+python -m scripts.inspect_page --storefront trendyol_tr
 
 # 2. First scrape (writes to trendyol.db)
-python -m scraper --storefront tr
-python -m scraper --storefront gulf
+python -m scraper --storefront trendyol_tr
+python -m scraper --storefront trendyol_uae
 
 # 3. Bot
 python bot.py
@@ -62,7 +62,7 @@ In Telegram:
 | Command | What it does |
 |---|---|
 | `/start` | Welcome + command list |
-| `/storefront` | Pick Turkey (TL) or Gulf (AED) |
+| `/storefront` | Pick a storefront (Trendyol/Shein × Turkey/UAE) |
 | `/categories` | Tap through the category tree; paginated results |
 | `/top` | Top 20 biggest discounts today |
 | `/outlet` | Outlet / clearance items only |
@@ -107,15 +107,18 @@ Politeness:
 
 ## Storefronts
 
-| Code | Country | storefrontId | Culture | Currency |
+| Code | Store | Country | Currency | Country pin |
 |---|---|---|---|---|
-| `tr` | Turkey | 1 | `tr-TR` | TL |
-| `gulf` | UAE | 36 | `en-AE` | AED |
+| `trendyol_tr` | Trendyol | Turkey | TL | `storefrontId=1`, culture `tr-TR` |
+| `trendyol_uae` | Trendyol | UAE | AED | `storefrontId=36`, culture `en-AE` |
+| `shein_tr` | Shein | Turkey | TL | host `tr.shein.com`, `currency=TRY` cookie |
+| `shein_uae` | Shein | UAE | AED | host `ar.shein.com`, `currency=AED` cookie |
 
-Same scraper code drives both — set the user's preference via `/storefront`.
-The `gulf` code is kept for backwards compatibility with existing DB rows
-and bot commands; it now points at the UAE storefront rather than
-`sa-en`, which Trendyol has retired.
+Users pick via `/storefront`; codes are namespaced `<store>_<country>` so
+the picker is unambiguous. The pre-multi-store codes `tr` and `gulf` are
+rewritten to `trendyol_tr` / `trendyol_uae` automatically: DB rows once on
+startup (`db.init_db()`), and `DEFAULT_STOREFRONT` env values on load.
+Trendyol's UAE storefront replaces the retired `sa-en` one.
 
 ## Tests
 
@@ -125,7 +128,7 @@ pytest tests/
 
 Currently only `formatters.py` has tests. When the scraper API drifts,
 the fastest way to catch it is `python -m scripts.inspect_page
---storefront tr` — it prints the discovered top-level categories with
+--storefront trendyol_tr` — it prints the discovered top-level categories with
 the pathModel it will send. Zero categories or empty responses means
 Trendyol changed the JS state blob or the API shape.
 

@@ -15,12 +15,22 @@ DAILY_DIGEST_MINUTE = int(os.environ.get("DAILY_DIGEST_MINUTE", "0"))
 MAX_PAGES_PER_CATEGORY = int(os.environ.get("MAX_PAGES_PER_CATEGORY", "5"))
 SCRAPER_CONCURRENCY = int(os.environ.get("SCRAPER_CONCURRENCY", "3"))
 
+# Scrape-level discount floor: products below this % never enter the DB,
+# for every store (static and dynamic). This is what makes the bot a
+# "deals" bot rather than a catalog mirror. CHANNEL_MIN_DISCOUNT_PCT
+# below filters again at posting time, so the channel threshold can be
+# raised above this floor without re-scraping.
+MIN_DISCOUNT_PCT = int(os.environ.get("MIN_DISCOUNT_PCT", "35"))
+
 # Digest / pagination sizing
 DIGEST_TOP_N = int(os.environ.get("DIGEST_TOP_N", "20"))
 PAGE_SIZE = int(os.environ.get("PAGE_SIZE", "10"))
 
-# Default storefront for new users
-DEFAULT_STOREFRONT = os.environ.get("DEFAULT_STOREFRONT", "tr")
+# Default storefront for new users. Legacy "tr"/"gulf" values from old
+# .env files are mapped to the namespaced codes.
+_LEGACY_STOREFRONTS = {"tr": "trendyol_tr", "gulf": "trendyol_uae"}
+DEFAULT_STOREFRONT = os.environ.get("DEFAULT_STOREFRONT", "trendyol_tr")
+DEFAULT_STOREFRONT = _LEGACY_STOREFRONTS.get(DEFAULT_STOREFRONT, DEFAULT_STOREFRONT)
 
 # Minimum seconds between on-demand scrapes triggered by /discounts
 SCRAPE_CACHE_SECONDS = int(os.environ.get("SCRAPE_CACHE_SECONDS", "600"))

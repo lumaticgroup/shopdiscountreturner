@@ -37,6 +37,7 @@ from urllib.parse import urlencode, urlparse, urlunparse
 import httpx
 from jsonpath_ng.ext import parse as jp_parse
 
+import config
 import db
 from scraper.base import Storefront, StoreScraper
 from scraper.models import ScrapedProduct
@@ -200,8 +201,8 @@ class GenericAPIStore(StoreScraper):
         if discount_pct is None and price is not None and original_price and original_price > price:
             discount_pct = round((original_price - price) / original_price * 100)
 
-        # Filter: no discount → not interesting.
-        if not discount_pct or discount_pct <= 0:
+        # Filter: below the floor → not interesting.
+        if not discount_pct or discount_pct <= 0 or discount_pct < config.MIN_DISCOUNT_PCT:
             return None
 
         return ScrapedProduct(

@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import config
 from scraper import models
 from .browser import PlaywrightSession
 from .storefronts import TrendyolStorefront as Storefront
@@ -30,6 +31,11 @@ async def fetch_category(
     "women-x-g1"), paginating until an empty page or `max_pages`.
     """
     seen: dict[str, models.ScrapedProduct] = {}
+    # Pagination tracking uses RAW item ids, not kept products: a page where
+    # every discount is below MIN_DISCOUNT_PCT is still a page of fresh
+    # items, and deeper pages may qualify — only stop when Trendyol starts
+    # repeating itself.
+    seen_raw_ids: set[str] = set()
     for page_idx in range(1, max_pages + 1):
         params = {
             "pathModel": path_model,
@@ -62,18 +68,23 @@ async def fetch_category(
                 category_breadcrumb, image_keys,
             )
 
-        new_count = 0
+        new_raw = 0
         for item in items:
+            pid = item.get("id")
+            if pid is None or str(pid) in seen_raw_ids:
+                continue
+            seen_raw_ids.add(str(pid))
+            new_raw += 1
             product = _to_product(item, storefront)
-            if product and product.product_id not in seen:
+            if product:
                 seen[product.product_id] = product
-                new_count += 1
 
         logger.info(
-            "%s p.%d: %d items → %d new (total %d)",
-            category_breadcrumb, page_idx, len(items), new_count, len(seen),
+            "%s p.%d: %d items → %d new (%d kept ≥%d%%)",
+            category_breadcrumb, page_idx, len(items), new_raw,
+            len(seen), config.MIN_DISCOUNT_PCT,
         )
-        if new_count == 0:
+        if new_raw == 0:
             break
 
     return list(seen.values())
@@ -106,7 +117,7 @@ def _to_product(item: dict, sf: Storefront) -> Optional[models.ScrapedProduct]:
         return None
 
     discount_pct = round((was_f - sale_f) / was_f * 100)
-    if discount_pct <= 0:
+    if discount_pct <= 0 or discount_pct < config.MIN_DISCOUNT_PCT:
         return None
 
     brand_field = item.get("brand")

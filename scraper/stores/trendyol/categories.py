@@ -19,6 +19,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from scraper import models
+from scraper.categories import persist_tree, slugify as _slug  # noqa: F401 (re-export)
 from .storefronts import TrendyolStorefront as Storefront
 
 logger = logging.getLogger("scraper.categories")
@@ -101,30 +102,6 @@ def parse_breadcrumb(breadcrumb_html: str) -> list[str]:
         if not dedup or dedup[-1] != n:
             dedup.append(n)
     return dedup
-
-
-def persist_tree(db, categories: list[models.ScrapedCategory]) -> dict[str, int]:
-    """
-    Upsert every node and return {breadcrumb: id}.
-    Nodes must be in depth order so parent IDs are known.
-    """
-    ids: dict[str, int] = {}
-    for cat in sorted(categories, key=lambda c: c.depth):
-        parent_id = ids.get(cat.parent_breadcrumb) if cat.parent_breadcrumb else None
-        cid = db.upsert_category(
-            storefront=cat.storefront,
-            name=cat.name,
-            slug=cat.slug,
-            breadcrumb=cat.breadcrumb,
-            depth=cat.depth,
-            parent_id=parent_id,
-        )
-        ids[cat.breadcrumb] = cid
-    return ids
-
-
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
 def _relative(href: str, base: str) -> str:
