@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS channel_posts (
 CREATE INDEX IF NOT EXISTS idx_channel_posts_posted_at
     ON channel_posts(posted_at);
 
+-- Per-storefront resume point for scrapers that get cut short by rate
+-- limiting (Shein's /risk/action/limit). Stores the breadcrumb of the
+-- category where the run was blocked; the next run rotates its category
+-- list to start there. Cleared after a full clean pass.
+CREATE TABLE IF NOT EXISTS scrape_cursors (
+    storefront TEXT PRIMARY KEY,
+    next_breadcrumb TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Two-role auth: admin (manages stores) vs customer (browses deals).
 -- Passwords are bcrypt-hashed. Email is the login identifier.
 CREATE TABLE IF NOT EXISTS users (

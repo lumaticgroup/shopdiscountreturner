@@ -53,6 +53,22 @@ logger = logging.getLogger("trendyol_bot")
 _scrape_lock = asyncio.Lock()
 _last_scrape_at: dict[str, float] = {}
 
+# Serialises background channel drains: at CHANNEL_POST_RATE_PER_MIN a big
+# backlog takes minutes, and a second scrape finishing mid-drain must not
+# start a competing loop over the same candidates.
+_channel_lock = asyncio.Lock()
+
+
+def _spawn_channel_firehose(bot) -> None:
+    """Drain the channel queue in the background; never blocks the caller."""
+    async def _run():
+        async with _channel_lock:
+            try:
+                await channel.post_qualifying_deals(bot)
+            except Exception:
+                logger.exception("Channel firehose failed")
+    asyncio.get_running_loop().create_task(_run())
+
 
 # ---------- storefront + role helpers ----------
 
@@ -316,10 +332,11 @@ async def discounts_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     concurrency=config.SCRAPER_CONCURRENCY,
                 )
                 _last_scrape_at[sf] = time.time()
-                try:
-                    await channel.post_qualifying_deals(context.bot)
-                except Exception:
-                    logger.exception("Channel firehose failed")
+                # Fire-and-forget: draining the channel queue takes
+                # len(candidates) / CHANNEL_POST_RATE_PER_MIN minutes, and
+                # awaiting it here would hold _scrape_lock and delay the
+                # user's reply for the whole drain.
+                _spawn_channel_firehose(context.bot)
             except Exception as e:
                 logger.exception("Scrape failed")
                 # Surface the actual failure reason to the user instead of
@@ -371,7 +388,8 @@ async def publish_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.effective_message.reply_text("Publishing to channel…")
     try:
-        posted = await channel.post_qualifying_deals(context.bot)
+        async with _channel_lock:
+            posted = await channel.post_qualifying_deals(context.bot)
     except Exception:
         logger.exception("publish failed")
         await update.effective_message.reply_text(
@@ -465,7 +483,8 @@ async def _handle_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, action:
             return
         await bot.send_message(chat_id, "Publishing to channel…")
         try:
-            posted = await channel.post_qualifying_deals(bot)
+            async with _channel_lock:
+                posted = await channel.post_qualifying_deals(bot)
         except Exception:
             logger.exception("publish (menu) failed")
             await bot.send_message(chat_id, "Publish failed — check server logs.")
@@ -545,7 +564,8 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Daily scrape failed for storefront %s", code)
 
     try:
-        await channel.post_qualifying_deals(context.bot)
+        async with _channel_lock:
+            await channel.post_qualifying_deals(context.bot)
     except Exception:
         logger.exception("Channel firehose failed during daily digest")
 

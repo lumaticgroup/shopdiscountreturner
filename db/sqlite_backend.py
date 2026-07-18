@@ -366,6 +366,36 @@ def record_channel_post(
         )
 
 
+# ---------- Scrape cursors (resume after rate-limit) ----------
+
+def get_scrape_cursor(storefront: str) -> Optional[str]:
+    with _conn() as c:
+        r = c.execute(
+            "SELECT next_breadcrumb FROM scrape_cursors WHERE storefront = ?",
+            (storefront,),
+        ).fetchone()
+        return r["next_breadcrumb"] if r else None
+
+
+def set_scrape_cursor(storefront: str, next_breadcrumb: Optional[str]) -> None:
+    """Save the resume point; None clears it (full pass completed)."""
+    with _conn() as c:
+        if next_breadcrumb is None:
+            c.execute(
+                "DELETE FROM scrape_cursors WHERE storefront = ?", (storefront,)
+            )
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        c.execute(
+            """INSERT INTO scrape_cursors (storefront, next_breadcrumb, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(storefront) DO UPDATE SET
+                   next_breadcrumb = excluded.next_breadcrumb,
+                   updated_at = excluded.updated_at""",
+            (storefront, next_breadcrumb, now),
+        )
+
+
 # ---------- Users / auth ----------
 
 def create_user(email: str, password_hash: str, role: str = "customer") -> int:

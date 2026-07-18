@@ -13,6 +13,7 @@ from .sqlite_backend import (
     get_category,
     get_dynamic_store,
     get_products_by_ids,
+    get_scrape_cursor,
     get_session,
     get_storefront_pref,
     get_user,
@@ -30,6 +31,7 @@ from .sqlite_backend import (
     revoke_session,
     role_for_chat,
     search_products,
+    set_scrape_cursor,
     set_storefront_pref,
     set_user_password,
     set_user_role,
@@ -68,6 +70,9 @@ __all__ = [
     # channel firehose
     "list_channel_candidates",
     "record_channel_post",
+    # scrape cursors
+    "get_scrape_cursor",
+    "set_scrape_cursor",
     # users / auth
     "create_user",
     "get_user_by_email",

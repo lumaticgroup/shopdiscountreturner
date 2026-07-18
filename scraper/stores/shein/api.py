@@ -91,7 +91,11 @@ async def fetch_listing(
             sf.code, url, GOODS_JS, block_scripts=True,
         )
 
-        if "/risk/challenge" in final_url or "captcha" in final_url:
+        # Any /risk/ landing is fatal for this context: /risk/challenge is
+        # the captcha, /risk/action/limit is the rate limiter. Both mean
+        # every further navigation this run gets the same wall — hammering
+        # 20+ more categories into it only deepens the IP's risk score.
+        if "/risk/" in final_url or "captcha" in final_url:
             raise RiskChallenged(f"{sf.code}: challenged at {final_url}")
 
         if payload is None:

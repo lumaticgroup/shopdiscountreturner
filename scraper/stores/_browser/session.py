@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import sys
 from typing import Any, Optional
 
 logger = logging.getLogger("scraper.session")
@@ -189,22 +190,33 @@ class BrowserSession:
         #     memory.
         #   --js-flags=--max-old-space-size=256: cap V8 heap so we don't push
         #     over the container limit warming a single page.
-        self._browser = await self._pw.chromium.launch(
-            headless=self._headless,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
+        #
+        # The low-memory process-model flags are Linux-only: on macOS,
+        # --single-process fatally crashes Chromium (SIGTRAP) when a page
+        # enumerates media devices — "The MacOS video capture code must be
+        # run on a CFRunLoop-enabled thread" — which Shein's fingerprinting
+        # script does. Dev machines have the RAM; only the container needs
+        # the squeeze.
+        args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-features=Translate,BackForwardCache,IsolateOrigins,site-per-process",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-extensions",
+        ]
+        if sys.platform == "linux":
+            args += [
                 "--single-process",
                 "--no-zygote",
                 "--renderer-process-limit=1",
-                "--disable-features=Translate,BackForwardCache,IsolateOrigins,site-per-process",
-                "--disable-background-networking",
-                "--disable-sync",
-                "--disable-extensions",
                 "--js-flags=--max-old-space-size=256",
-            ],
+            ]
+        self._browser = await self._pw.chromium.launch(
+            headless=self._headless,
+            args=args,
             chromium_sandbox=False,
         )
         _log_memory_state("after chromium launch")
