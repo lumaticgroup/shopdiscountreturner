@@ -164,6 +164,13 @@ def _to_product(item: dict, sf: Storefront) -> Optional[models.ScrapedProduct]:
     # Filter: below the floor → not interesting for the deals channel.
     if not discount or discount <= 0 or discount < config.MIN_DISCOUNT_PCT \
             or sale is None:
+        # DEBUG: Log first filtered product to see what we're missing
+        if not hasattr(_to_product, "_logged_filtered"):
+            _to_product._logged_filtered = True
+            logger.info(
+                "Sample filtered product: discount=%s%%, sale=%s, was=%s, name=%s",
+                discount, sale, was, name[:50] if name else "N/A"
+            )
         return None
     if was is None or was <= sale:
         was = round(sale / (1 - discount / 100), 2) if discount < 100 else sale

@@ -356,13 +356,21 @@ async def discounts_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.effective_message.reply_text(msg)
 
     products = db.top_discounts(sf, limit=config.DIGEST_TOP_N)
-    await update.effective_message.reply_text(
-        format_product_list(
+    if not products:
+        msg = (
+            f"No products found with ≥30% discount yet.\n\n"
+            f"The scraper found items but they all have smaller discounts. "
+            f"Try again later when bigger sales are available."
+        )
+    else:
+        msg = format_product_list(
             products,
             title=f"Top discounts — {_storefront_display(sf)}",
             empty_msg="Nothing to show yet\\.",
-        ),
-        parse_mode=ParseMode.MARKDOWN_V2,
+        )
+    await update.effective_message.reply_text(
+        msg,
+        parse_mode=ParseMode.MARKDOWN_V2 if products else None,
         disable_web_page_preview=True,
     )
 
