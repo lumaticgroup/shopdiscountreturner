@@ -131,8 +131,9 @@ def _publish_button_label() -> str:
     )
 
 
-def _welcome_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
+def _customer_keyboard() -> InlineKeyboardMarkup:
+    """Clean menu for regular customers (deals browsing only)."""
+    rows = [
         [
             InlineKeyboardButton("🔥 Top Deals", callback_data="menu:top"),
             InlineKeyboardButton("🍾 Outlet", callback_data="menu:outlet"),
@@ -146,22 +147,29 @@ def _welcome_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔄 Refresh Deals", callback_data="menu:discounts"),
         ],
     ]
-    if is_admin:
-        rows.append([
-            InlineKeyboardButton("⚙️ Admin Panel", callback_data="admin:menu"),
-            InlineKeyboardButton(_publish_button_label(), callback_data="menu:publish"),
-        ])
     return InlineKeyboardMarkup(rows)
 
 
-def _welcome_text(user_name: str, storefront_display: str, is_admin: bool) -> str:
-    role_line = "\n_Role: 👑 Administrator_" if is_admin else ""
-    return (
-        f"*Welcome, {escape_md_v2(user_name)}*\n"
-        f"Storefront: *{escape_md_v2(storefront_display)}*"
-        f"{role_line}\n\n"
-        "Pick an option below\\."
-    )
+def _admin_customer_keyboard() -> InlineKeyboardMarkup:
+    """Deals browsing menu with a quick return button for administrators."""
+    rows = [
+        [
+            InlineKeyboardButton("🔥 Top Deals", callback_data="menu:top"),
+            InlineKeyboardButton("🍾 Outlet", callback_data="menu:outlet"),
+        ],
+        [
+            InlineKeyboardButton("📁 Categories", callback_data="menu:categories"),
+            InlineKeyboardButton("🔍 Search", callback_data="menu:search"),
+        ],
+        [
+            InlineKeyboardButton("🏬 Storefront", callback_data="menu:storefront"),
+            InlineKeyboardButton("🔄 Refresh Deals", callback_data="menu:discounts"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Back to Admin Dashboard", callback_data="admin:menu"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 # ---------- admin in-bot menu builders ----------
@@ -173,10 +181,10 @@ def _admin_menu_text_and_markup() -> tuple[str, InlineKeyboardMarkup, ParseMode]
     mode = _publish_mode()
 
     text = (
-        "⚙️ *Admin Control Panel*\n\n"
+        "👑 *Administrator Dashboard*\n\n"
         f"🏬 Dynamic Stores: *{enabled_count}/{total_count}* active\n"
         f"📢 Channel Publishing: *{mode.title()}*\n\n"
-        "Select an administrative action below:"
+        "Choose an administrative management action below:"
     )
     kb = InlineKeyboardMarkup([
         [
@@ -192,10 +200,11 @@ def _admin_menu_text_and_markup() -> tuple[str, InlineKeyboardMarkup, ParseMode]
             InlineKeyboardButton("📋 Config Templates", callback_data="admin:samples"),
         ],
         [
-            InlineKeyboardButton("↩ Main Menu", callback_data="admin:back_main"),
+            InlineKeyboardButton("👁 Customer Deals View", callback_data="admin:customer_view"),
         ],
     ])
     return text, kb, ParseMode.MARKDOWN_V2
+
 
 
 
@@ -267,19 +276,31 @@ def _build_store_detail(code: str) -> tuple[str, InlineKeyboardMarkup, ParseMode
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    First-touch entry point for all users.
-    Instantly displays the interactive menu without any login hurdles.
+    First-touch entry point.
+    - Regular Customers see only the clean customer shopping menu.
+    - Administrators see the Administrator Dashboard.
     """
     chat_id = update.effective_chat.id
     sf = _user_storefront(chat_id)
     is_admin = _is_admin(chat_id)
     user_name = update.effective_user.first_name or "Shopper"
 
-    await update.effective_message.reply_text(
-        _welcome_text(user_name, _storefront_display(sf), is_admin),
-        reply_markup=_welcome_keyboard(is_admin),
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
+    if is_admin:
+        text, kb, mode = _admin_menu_text_and_markup()
+        await update.effective_message.reply_text(
+            f"*Welcome, Administrator {escape_md_v2(user_name)}*\n\n" + text,
+            reply_markup=kb,
+            parse_mode=mode,
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"*Welcome, {escape_md_v2(user_name)}*\n"
+            f"Storefront: *{escape_md_v2(_storefront_display(sf))}*\n\n"
+            "Discover the latest discounted products and outlet deals below\\.",
+            reply_markup=_customer_keyboard(),
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
 
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -737,12 +758,19 @@ async def admin_login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             admin_id = admin_user["id"]
         db.link_chat_to_user(chat_id, admin_id)
+
+        # Instantly transform to Admin View!
+        text, kb, mode = _admin_menu_text_and_markup()
+        user_name = update.effective_user.first_name or "Admin"
         await update.effective_message.reply_text(
-            "👑 *Admin rights granted!* You can now access `/admin`\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            f"👑 *Admin Mode Activated\\!*\n\n"
+            f"*Welcome, Administrator {escape_md_v2(user_name)}*\n\n" + text,
+            reply_markup=kb,
+            parse_mode=mode,
         )
     else:
         await update.effective_message.reply_text("❌ Incorrect admin password.")
+
 
 
 # ---------- callback query (buttons) ----------
@@ -817,8 +845,9 @@ async def _handle_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, action:
     elif action == "search":
         await bot.send_message(
             chat_id,
-            "Send `/search <term>` — e.g. `/search elbise`.",
+            "Send `/search <term>` — e.g. `/search elbise`\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
+
         )
         return
     elif action == "publish":
@@ -974,15 +1003,29 @@ async def _handle_admin_action(
         await sample_store_cmd(query, context)
         return
 
-    if action == "back_main":
+    if action == "customer_view":
         sf = _user_storefront(chat_id)
-        user_name = query.from_user.first_name or "Shopper"
+        text = (
+            f"👁 *Customer Deals View Preview*\n"
+            f"Storefront: *{escape_md_v2(_storefront_display(sf))}*\n\n"
+            "This is the exact deals menu regular customers see in the bot\\."
+        )
         await query.edit_message_text(
-            _welcome_text(user_name, _storefront_display(sf), is_admin=True),
-            reply_markup=_welcome_keyboard(is_admin=True),
+            text,
+            reply_markup=_admin_customer_keyboard(),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
+
+    if action == "back_main":
+        text, kb, mode = _admin_menu_text_and_markup()
+        await query.edit_message_text(
+            text,
+            reply_markup=kb,
+            parse_mode=mode,
+        )
+        return
+
 
 
 
