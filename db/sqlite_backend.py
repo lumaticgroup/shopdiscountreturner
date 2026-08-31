@@ -25,11 +25,20 @@ def _conn():
         c.close()
 
 
+def _migrate_language_column() -> None:
+    with _conn() as c:
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(user_prefs)").fetchall()]
+        if cols and "language_pref" not in cols:
+            c.execute("ALTER TABLE user_prefs ADD COLUMN language_pref TEXT NOT NULL DEFAULT 'fa'")
+
+
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA_PATH.read_text())
     _migrate_legacy_storefronts()
+    _migrate_language_column()
     sync_storefronts()
+
 
 
 # Pre-multi-store storefront codes → namespaced codes. Old DBs carry the
@@ -317,6 +326,25 @@ def set_storefront_pref(chat_id: int, storefront: str) -> None:
                ON CONFLICT(chat_id) DO UPDATE SET storefront_pref = excluded.storefront_pref""",
             (chat_id, storefront),
         )
+
+
+def get_language_pref(chat_id: int) -> Optional[str]:
+    with _conn() as c:
+        r = c.execute(
+            "SELECT language_pref FROM user_prefs WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+        return r["language_pref"] if r and r["language_pref"] else None
+
+
+def set_language_pref(chat_id: int, lang: str) -> None:
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO user_prefs (chat_id, storefront_pref, language_pref)
+               VALUES (?, ?, ?)
+               ON CONFLICT(chat_id) DO UPDATE SET language_pref = excluded.language_pref""",
+            (chat_id, config.DEFAULT_STOREFRONT, lang),
+        )
+
 
 
 # ---------- Channel firehose ----------

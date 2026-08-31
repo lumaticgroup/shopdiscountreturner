@@ -67,8 +67,10 @@ CREATE TABLE IF NOT EXISTS subscribers (
 
 CREATE TABLE IF NOT EXISTS user_prefs (
     chat_id INTEGER PRIMARY KEY,
-    storefront_pref TEXT NOT NULL DEFAULT 'trendyol_tr' REFERENCES storefronts(code)
+    storefront_pref TEXT NOT NULL DEFAULT 'trendyol_tr' REFERENCES storefronts(code),
+    language_pref TEXT NOT NULL DEFAULT 'fa'
 );
+
 
 -- Tracks products already posted to the ≥N% Telegram channel firehose so
 -- we don't repost. A product reposts only when its discount_pct strictly

@@ -10,6 +10,8 @@ Inside `[link text](url)`, the URL must escape `)` and `\\`.
 
 from typing import Iterable
 
+from locales import t
+
 _MDV2_SPECIAL = set(r"_*[]()~`>#+-=|{}.!\\")
 
 
@@ -35,7 +37,7 @@ def _price_line(product: dict) -> str:
     return f"*{escape_md_v2(price_str)}*"
 
 
-def format_product(product: dict) -> str:
+def format_product(product: dict, lang: str = "fa") -> str:
     """One product as a Telegram MarkdownV2 block."""
     name = (product.get("name") or "Unknown")[:80]
     breadcrumb = product.get("category_breadcrumb") or ""
@@ -47,7 +49,8 @@ def format_product(product: dict) -> str:
     trail_bits = []
     if breadcrumb:
         trail_bits.append(escape_md_v2(breadcrumb))
-    trail_bits.append(f"[link]({escape_url(url)})")
+    link_label = escape_md_v2(t("link_view_site", lang))
+    trail_bits.append(f"[{link_label}]({escape_url(url)})")
     trail = " · ".join(trail_bits)
 
     return f"{header}\n{price} · {trail}"
@@ -56,17 +59,18 @@ def format_product(product: dict) -> str:
 def format_product_list(
     products: list[dict],
     title: str = "",
-    empty_msg: str = "No discounted products found yet\\.",
+    empty_msg: str = "",
+    lang: str = "fa",
 ) -> str:
     if not products:
-        return empty_msg
-    body = "\n\n".join(format_product(p) for p in products)
+        return empty_msg or t("no_deals_found", lang)
+    body = "\n\n".join(format_product(p, lang=lang) for p in products)
     if title:
         return f"*{escape_md_v2(title)}*\n\n{body}"
     return body
 
 
-def format_channel_caption(row: dict, store_display_name: str) -> str:
+def format_channel_caption(row: dict, store_display_name: str, lang: str = "fa") -> str:
     """
     MarkdownV2 caption for one channel post. Every user-derived string is
     escaped; static template chars (>, !, ., etc.) are pre-escaped inline.
@@ -84,9 +88,7 @@ def format_channel_caption(row: dict, store_display_name: str) -> str:
     now = f"{price:.2f} {currency}".strip() if price else ""
     outlet = bool(row.get("is_outlet"))
 
-    # Outlet items get a distinct top-line badge so the channel reads
-    # "regular deal" vs "clearance find" at a glance.
-    head = f"🏷 *\\-{pct}% Outlet*" if outlet else f"🔥 *\\-{pct}%*"
+    head = t("outlet_badge", lang, pct=pct) if outlet else t("deal_badge", lang, pct=pct)
     lines = [head, f"*{escape_md_v2(name)}*"]
     if brand:
         lines.append(escape_md_v2(brand))
@@ -100,30 +102,46 @@ def format_channel_caption(row: dict, store_display_name: str) -> str:
         lines.append(f"📁 {escape_md_v2(breadcrumb)}")
     lines.append(f"🏬 {escape_md_v2(store_display_name)}")
     lines.append("")
-    lines.append(f"[Buy on {escape_md_v2(store_display_name)}]({escape_url(url)})")
+    buy_text = escape_md_v2(t("link_buy_on_store", lang, store=store_display_name))
+    lines.append(f"[{buy_text}]({escape_url(url)})")
     return "\n".join(lines)
 
 
-def format_categories(rows: Iterable[dict]) -> str:
+def format_categories(rows: Iterable[dict], lang: str = "fa") -> str:
+    suffix = escape_md_v2(t("items_count_suffix", lang))
     lines = [
-        f"• *{escape_md_v2(r['name'])}* — {r.get('product_count', 0)} items"
+        f"• *{escape_md_v2(r['name'])}* — {r.get('product_count', 0)} {suffix}"
         for r in rows
     ]
-    return "\n".join(lines) if lines else "No categories yet — run /discounts first\\."
+    return "\n".join(lines) if lines else t("categories_empty", lang)
 
 
-def format_help(storefront_display: str) -> str:
-    # Static template — every literal MarkdownV2-reserved char is escaped
-    # up-front so we don't have to worry about it drifting.
-    lines = [
-        f"*Discount bot* — storefront: *{escape_md_v2(storefront_display)}*",
-        "",
-        "/categories — browse by category",
-        "/top — biggest discounts today",
-        "/outlet — outlet & clearance",
-        "/search \\<term\\> — search by name or brand",
-        "/storefront — switch between Turkey and Gulf",
-        "/subscribe — daily digest",
-        "/unsubscribe — stop the digest",
-    ]
+def format_help(storefront_display: str, lang: str = "fa") -> str:
+    if lang == "fa":
+        lines = [
+            f"*ربات تخفیف‌یاب* — فروشگاه فعال: *{escape_md_v2(storefront_display)}*",
+            "",
+            "/top — برترین تخفیف‌های امروز",
+            "/outlet — حراجی‌ها و کالاهای اوت‌لت",
+            "/categories — دسته‌بندی‌های کالا",
+            "/search \\<عبارت\\> — جستجوی کالا یا برند",
+            "/storefront — تغییر فروشگاه فعال",
+            "/language — تغییر زبان ربات",
+            "/subscribe — عضویت در گزارش روزانه",
+            "/unsubscribe — لغو عضویت در گزارش روزانه",
+        ]
+    else:
+        lines = [
+            f"*Discount bot* — storefront: *{escape_md_v2(storefront_display)}*",
+            "",
+            "/top — biggest discounts today",
+            "/outlet — outlet & clearance",
+            "/categories — browse by category",
+            "/search \\<term\\> — search by name or brand",
+            "/storefront — switch storefront",
+            "/language — change language",
+            "/subscribe — daily digest",
+            "/unsubscribe — stop the digest",
+        ]
     return "\n".join(lines)
+

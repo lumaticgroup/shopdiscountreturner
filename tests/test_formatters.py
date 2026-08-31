@@ -50,11 +50,11 @@ def _p(**overrides):
 
 
 def test_format_product_includes_discount_and_price():
-    out = format_product(_p())
+    out = format_product(_p(), lang="en")
     assert "\\-50%" in out
     assert "TL" in out
     assert "Fashion" in out
-    assert "link" in out
+    assert "View on Site" in out
 
 
 def test_format_product_with_reserved_chars_in_name_does_not_break():
@@ -74,7 +74,9 @@ def test_format_product_url_with_parens_is_escaped():
 
 
 def test_format_product_list_empty_returns_msg():
-    assert format_product_list([]).startswith("No discounted")
+    assert "No discounted" in format_product_list([], lang="en")
+    assert "هنوز" in format_product_list([], lang="fa")
+
 
 
 def test_format_categories():

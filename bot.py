@@ -37,10 +37,13 @@ from telegram.ext import (
 import channel
 import config
 import db
+import formatters
 from formatters import (
     escape_md_v2,
     format_product_list,
 )
+import locales
+from locales import t, DEFAULT_LANGUAGE
 from scraper import scrape_storefront
 from scraper.stores import (
     LEGACY_STOREFRONT_CODES,
@@ -54,14 +57,13 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger("trendyol_bot")
+logger = logging.getLogger("bot")
 
+# Serializes scrape requests per process.
 _scrape_lock = asyncio.Lock()
 _last_scrape_at: dict[str, float] = {}
 
-# Serialises background channel drains: at CHANNEL_POST_RATE_PER_MIN a big
-# backlog takes minutes, and a second scrape finishing mid-drain must not
-# start a competing loop over the same candidates.
+# Channel posting lock: avoids concurrent drains.
 _channel_lock = asyncio.Lock()
 
 
@@ -79,7 +81,7 @@ def _spawn_channel_firehose(bot) -> None:
 
 
 
-# ---------- storefront + role helpers ----------
+# ---------- storefront, language + role helpers ----------
 
 def _user_storefront(chat_id: int) -> str:
     try:
@@ -93,7 +95,17 @@ def _user_storefront(chat_id: int) -> str:
     return pref
 
 
-def _storefront_display(code: str) -> str:
+def _user_lang(chat_id: int) -> str:
+    try:
+        return db.get_language_pref(chat_id) or DEFAULT_LANGUAGE
+    except Exception:
+        return DEFAULT_LANGUAGE
+
+
+def _storefront_display(code: str, lang: str = "fa") -> str:
+    key = f"sf_{code}"
+    if key in locales.STRINGS:
+        return t(key, lang)
     try:
         s = get_storefront(code)
         return f"{s.display_name} ({s.currency})"
@@ -121,52 +133,64 @@ def _set_publish_mode(mode: str) -> None:
     db.set_setting("publish_mode", mode)
 
 
-# ---------- welcome menu (inline keyboard "box") ----------
+# ---------- keyboards & menus ----------
 
-def _publish_button_label() -> str:
-    return (
-        "📢 Publishing: Auto"
-        if _publish_mode() == "auto"
-        else "📢 Publishing: Manual"
-    )
+def _language_keyboard() -> InlineKeyboardMarkup:
+    """Language selection keyboard."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang:fa"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang:en"),
+        ]
+    ])
 
 
-def _customer_keyboard() -> InlineKeyboardMarkup:
-    """Clean menu for regular customers (deals browsing only)."""
+def _customer_keyboard(is_admin: bool = False, lang: str = "fa") -> InlineKeyboardMarkup:
+    """Clean menu for regular customers (deals browsing only). Includes admin switch if authenticated."""
     rows = [
         [
-            InlineKeyboardButton("🔥 Top Deals", callback_data="menu:top"),
-            InlineKeyboardButton("🍾 Outlet", callback_data="menu:outlet"),
+            InlineKeyboardButton(t("btn_top_deals", lang), callback_data="menu:top"),
+            InlineKeyboardButton(t("btn_outlet", lang), callback_data="menu:outlet"),
         ],
         [
-            InlineKeyboardButton("📁 Categories", callback_data="menu:categories"),
-            InlineKeyboardButton("🔍 Search", callback_data="menu:search"),
+            InlineKeyboardButton(t("btn_categories", lang), callback_data="menu:categories"),
+            InlineKeyboardButton(t("btn_search", lang), callback_data="menu:search"),
         ],
         [
-            InlineKeyboardButton("🏬 Storefront", callback_data="menu:storefront"),
-            InlineKeyboardButton("🔄 Refresh Deals", callback_data="menu:discounts"),
+            InlineKeyboardButton(t("btn_storefront", lang), callback_data="menu:storefront"),
+            InlineKeyboardButton(t("btn_refresh_deals", lang), callback_data="menu:discounts"),
+        ],
+        [
+            InlineKeyboardButton(t("btn_language", lang), callback_data="menu:language"),
         ],
     ]
+    if is_admin:
+        rows.append([
+            InlineKeyboardButton(t("btn_switch_admin", lang), callback_data="admin:menu"),
+        ])
     return InlineKeyboardMarkup(rows)
 
 
-def _admin_customer_keyboard() -> InlineKeyboardMarkup:
+def _admin_customer_keyboard(lang: str = "fa") -> InlineKeyboardMarkup:
     """Deals browsing menu with a quick return button for administrators."""
     rows = [
         [
-            InlineKeyboardButton("🔥 Top Deals", callback_data="menu:top"),
-            InlineKeyboardButton("🍾 Outlet", callback_data="menu:outlet"),
+            InlineKeyboardButton(t("btn_top_deals", lang), callback_data="menu:top"),
+            InlineKeyboardButton(t("btn_outlet", lang), callback_data="menu:outlet"),
         ],
         [
-            InlineKeyboardButton("📁 Categories", callback_data="menu:categories"),
-            InlineKeyboardButton("🔍 Search", callback_data="menu:search"),
+            InlineKeyboardButton(t("btn_categories", lang), callback_data="menu:categories"),
+            InlineKeyboardButton(t("btn_search", lang), callback_data="menu:search"),
         ],
         [
-            InlineKeyboardButton("🏬 Storefront", callback_data="menu:storefront"),
-            InlineKeyboardButton("🔄 Refresh Deals", callback_data="menu:discounts"),
+            InlineKeyboardButton(t("btn_storefront", lang), callback_data="menu:storefront"),
+            InlineKeyboardButton(t("btn_refresh_deals", lang), callback_data="menu:discounts"),
         ],
         [
-            InlineKeyboardButton("⚙️ Back to Admin Dashboard", callback_data="admin:menu"),
+            InlineKeyboardButton(t("btn_language", lang), callback_data="menu:language"),
+        ],
+        [
+            InlineKeyboardButton(t("btn_back_admin", lang), callback_data="admin:menu"),
         ],
     ]
     return InlineKeyboardMarkup(rows)
@@ -174,51 +198,46 @@ def _admin_customer_keyboard() -> InlineKeyboardMarkup:
 
 # ---------- admin in-bot menu builders ----------
 
-def _admin_menu_text_and_markup() -> tuple[str, InlineKeyboardMarkup, ParseMode]:
+def _admin_menu_text_and_markup(lang: str = "fa") -> tuple[str, InlineKeyboardMarkup, ParseMode]:
     stores = db.list_dynamic_stores(enabled_only=False)
     enabled_count = sum(1 for s in stores if s.get("enabled", 1))
     total_count = len(stores)
     mode = _publish_mode()
 
-    text = (
-        "👑 *Administrator Dashboard*\n\n"
-        f"🏬 Dynamic Stores: *{enabled_count}/{total_count}* active\n"
-        f"📢 Channel Publishing: *{mode.title()}*\n\n"
-        "Choose an administrative management action below:"
+    text = t(
+        "admin_dashboard_title",
+        lang,
+        enabled=enabled_count,
+        total=total_count,
+        mode=mode.title(),
     )
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🏬 Manage Stores", callback_data="admin:stores"),
-            InlineKeyboardButton("➕ Add Store Guide", callback_data="admin:add_guide"),
+            InlineKeyboardButton(t("btn_admin_stores", lang), callback_data="admin:stores"),
+            InlineKeyboardButton(t("btn_admin_add_guide", lang), callback_data="admin:add_guide"),
         ],
         [
-            InlineKeyboardButton("⚡ Scrape All", callback_data="admin:scrape_all"),
-            InlineKeyboardButton("🔄 Reload Registry", callback_data="admin:reload"),
+            InlineKeyboardButton(t("btn_admin_scrape_all", lang), callback_data="admin:scrape_all"),
+            InlineKeyboardButton(t("btn_admin_reload", lang), callback_data="admin:reload"),
         ],
         [
-            InlineKeyboardButton("📢 Publishing Menu", callback_data="menu:publish"),
-            InlineKeyboardButton("📋 Config Templates", callback_data="admin:samples"),
+            InlineKeyboardButton(t("btn_admin_publishing", lang), callback_data="menu:publish"),
+            InlineKeyboardButton(t("btn_admin_templates", lang), callback_data="admin:samples"),
         ],
         [
-            InlineKeyboardButton("👁 Customer Deals View", callback_data="admin:customer_view"),
+            InlineKeyboardButton(t("btn_admin_customer_view", lang), callback_data="admin:customer_view"),
         ],
     ])
     return text, kb, ParseMode.MARKDOWN_V2
 
 
-
-
-def _build_stores_list_keyboard() -> tuple[str, InlineKeyboardMarkup, ParseMode]:
+def _build_stores_list_keyboard(lang: str = "fa") -> tuple[str, InlineKeyboardMarkup, ParseMode]:
     stores = db.list_dynamic_stores(enabled_only=False)
     if not stores:
-        text = (
-            "🏬 *Dynamic Stores*\n\n"
-            "No dynamic stores registered yet\\.\n"
-            "Use `/addstore <JSON>` or check `/sample_store` to add one\\."
-        )
+        text = t("dynamic_stores_empty", lang)
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Add Store Guide", callback_data="admin:add_guide")],
-            [InlineKeyboardButton("↩ Admin Menu", callback_data="admin:menu")],
+            [InlineKeyboardButton(t("btn_admin_add_guide", lang), callback_data="admin:add_guide")],
+            [InlineKeyboardButton(t("btn_admin_back_menu", lang), callback_data="admin:menu")],
         ])
         return text, kb, ParseMode.MARKDOWN_V2
 
@@ -229,27 +248,28 @@ def _build_stores_list_keyboard() -> tuple[str, InlineKeyboardMarkup, ParseMode]
         rows.append([InlineKeyboardButton(label, callback_data=f"admin:store:{s['code']}")])
 
     rows.append([
-        InlineKeyboardButton("➕ Add Store Guide", callback_data="admin:add_guide"),
-        InlineKeyboardButton("🔄 Reload Registry", callback_data="admin:reload"),
+        InlineKeyboardButton(t("btn_admin_add_guide", lang), callback_data="admin:add_guide"),
+        InlineKeyboardButton(t("btn_admin_reload", lang), callback_data="admin:reload"),
     ])
-    rows.append([InlineKeyboardButton("↩ Admin Menu", callback_data="admin:menu")])
+    rows.append([InlineKeyboardButton(t("btn_admin_back_menu", lang), callback_data="admin:menu")])
 
-    text = "🏬 *Dynamic Stores List*\n\nSelect a store below to view settings or toggle state:"
+    text = t("dynamic_stores_list_title", lang)
     return text, InlineKeyboardMarkup(rows), ParseMode.MARKDOWN_V2
 
 
-def _build_store_detail(code: str) -> tuple[str, InlineKeyboardMarkup, ParseMode]:
+
+def _build_store_detail(code: str, lang: str = "fa") -> tuple[str, InlineKeyboardMarkup, ParseMode]:
     store = db.get_dynamic_store(code)
     if not store:
         return (
             "Store not found\\.",
-            InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back to Stores", callback_data="admin:stores")]]),
+            InlineKeyboardMarkup([[InlineKeyboardButton(t("btn_admin_back_stores", lang), callback_data="admin:stores")]]),
             ParseMode.MARKDOWN_V2,
         )
 
     is_enabled = bool(store.get("enabled", 1))
     status_str = "🟢 Enabled" if is_enabled else "🔴 Disabled"
-    toggle_label = "🔴 Disable Store" if is_enabled else "🟢 Enable Store"
+    toggle_label = t("btn_store_disable", lang) if is_enabled else t("btn_store_enable", lang)
 
     text = (
         f"🏬 *Store:* `{escape_md_v2(store['display_name'])}`\n\n"
@@ -265,9 +285,9 @@ def _build_store_detail(code: str) -> tuple[str, InlineKeyboardMarkup, ParseMode
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(toggle_label, callback_data=f"admin:toggle:{code}"),
-            InlineKeyboardButton("🗑 Delete Store", callback_data=f"admin:del:{code}"),
+            InlineKeyboardButton(t("btn_store_delete", lang), callback_data=f"admin:del:{code}"),
         ],
-        [InlineKeyboardButton("↩ Back to Stores", callback_data="admin:stores")],
+        [InlineKeyboardButton(t("btn_admin_back_stores", lang), callback_data="admin:stores")],
     ])
     return text, kb, ParseMode.MARKDOWN_V2
 
@@ -277,43 +297,56 @@ def _build_store_detail(code: str) -> tuple[str, InlineKeyboardMarkup, ParseMode
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     First-touch entry point.
-    - Regular Customers see only the clean customer shopping menu.
-    - Administrators see the Administrator Dashboard.
+    If user has not chosen a language yet, prompt for language selection.
+    Otherwise display the customer deals browsing menu by default.
     """
     chat_id = update.effective_chat.id
-    sf = _user_storefront(chat_id)
-    is_admin = _is_admin(chat_id)
-    user_name = update.effective_user.first_name or "Shopper"
-
-    if is_admin:
-        text, kb, mode = _admin_menu_text_and_markup()
+    lang_pref = db.get_language_pref(chat_id)
+    if not lang_pref:
         await update.effective_message.reply_text(
-            f"*Welcome, Administrator {escape_md_v2(user_name)}*\n\n" + text,
-            reply_markup=kb,
-            parse_mode=mode,
-        )
-    else:
-        await update.effective_message.reply_text(
-            f"*Welcome, {escape_md_v2(user_name)}*\n"
-            f"Storefront: *{escape_md_v2(_storefront_display(sf))}*\n\n"
-            "Discover the latest discounted products and outlet deals below\\.",
-            reply_markup=_customer_keyboard(),
+            t("lang_picker_prompt", "fa"),
+            reply_markup=_language_keyboard(),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
+        return
 
+    lang = lang_pref
+    sf = _user_storefront(chat_id)
+    is_admin = _is_admin(chat_id)
+    user_name = update.effective_user.first_name or ("خریدار" if lang == "fa" else "Shopper")
+
+    header = t("welcome_header", lang, name=escape_md_v2(user_name))
+    sf_line = t("storefront_label", lang, storefront=escape_md_v2(_storefront_display(sf, lang)))
+    role_line = f"\n{t('role_admin', lang)}" if is_admin else ""
+    subtext = t("welcome_subtext", lang)
+
+    await update.effective_message.reply_text(
+        f"{header}\n{sf_line}{role_line}\n\n{subtext}",
+        reply_markup=_customer_keyboard(is_admin=is_admin, lang=lang),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+
+async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Language switcher command (/language or /lang)."""
+    await update.effective_message.reply_text(
+        t("lang_picker_prompt", "fa"),
+        reply_markup=_language_keyboard(),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
 
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Open the in-bot admin control panel. Admins only."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
         await update.effective_message.reply_text(
-            "⛔ *Admin only*\\.\n"
-            "If you have the admin password, use `/admin_login <password>` to authenticate\\.",
+            t("admin_only_error", lang),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
-    text, kb, mode = _admin_menu_text_and_markup()
+    text, kb, mode = _admin_menu_text_and_markup(lang)
     await update.effective_message.reply_text(
         text, reply_markup=kb, parse_mode=mode,
     )
@@ -323,87 +356,99 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _build_top(chat_id: int, outlet_only: bool = False) -> tuple[str, None, Optional[ParseMode]]:
     sf = _user_storefront(chat_id)
+    lang = _user_lang(chat_id)
     products = db.top_discounts(
         sf, limit=config.DIGEST_TOP_N, outlet_only=outlet_only,
     )
-    title = "Outlet / clearance" if outlet_only else f"Top discounts — {_storefront_display(sf)}"
-    empty = "No outlet items yet." if outlet_only else "No products yet — run /discounts to fetch the latest."
+    sf_name = _storefront_display(sf, lang)
+    title = (
+        t("outlet_deals_header", lang, storefront=sf_name)
+        if outlet_only
+        else t("top_deals_header", lang, storefront=sf_name)
+    )
+    empty = t("no_deals_found", lang)
     if not products:
         return empty, None, None
     return (
-        format_product_list(products, title=title),
+        format_product_list(products, title=title, empty_msg=empty, lang=lang),
         None,
         ParseMode.MARKDOWN_V2,
     )
 
 
+def _category_keyboard(rows: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(r["name"], callback_data=f"cat:{r['id']}:0")]
+        for r in rows
+    ])
+
+
 def _build_categories(chat_id: int) -> tuple[str, Optional[InlineKeyboardMarkup], Optional[ParseMode]]:
     sf = _user_storefront(chat_id)
+    lang = _user_lang(chat_id)
     rows = db.list_top_categories(sf)
     if not rows:
         return (
-            "No categories yet — run /discounts to fetch the latest.",
+            t("categories_empty", lang),
             None, None,
         )
+    title = t("categories_title", lang)
+    sf_name = _storefront_display(sf, lang)
     return (
-        f"*Categories* — {escape_md_v2(_storefront_display(sf))}",
+        f"{title} — {escape_md_v2(sf_name)}",
         _category_keyboard(rows),
         ParseMode.MARKDOWN_V2,
     )
 
 
-def _publishing_menu_text_and_markup() -> tuple[str, InlineKeyboardMarkup, ParseMode]:
+def _publishing_menu_text_and_markup(lang: str = "fa") -> tuple[str, InlineKeyboardMarkup, ParseMode]:
     mode = _publish_mode()
     interval = config.AUTO_PUBLISH_INTERVAL_MINUTES
     if mode == "auto":
-        header = f"🔁 *Automatic* — every {interval} min"
+        header = t("pub_auto_header", lang, interval=interval)
         toggle_row = [InlineKeyboardButton(
-            "⏸ Switch to Manual", callback_data="pub:manual",
+            t("btn_pub_switch_manual", lang), callback_data="pub:manual",
         )]
     else:
-        header = "🖐 *Manual*"
+        header = t("pub_manual_header", lang)
         toggle_row = [InlineKeyboardButton(
-            "▶ Switch to Automatic", callback_data="pub:auto",
+            t("btn_pub_switch_auto", lang), callback_data="pub:auto",
         )]
 
-    body = (
-        f"Publishing mode: {header}\n\n"
-        "*Manual* — nothing is posted to the channel until you tap "
-        "*Publish now*\\.\n"
-        f"*Automatic* — every {interval} minutes the bot refreshes every "
-        "storefront and posts the latest qualifying deals to the channel\\.\n\n"
-        "Tap *Publish now* to drain the queue immediately in either mode\\."
-    )
+    body = t("pub_menu_body", lang, header=header, interval=interval)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Publish now", callback_data="pub:now")],
+        [InlineKeyboardButton(t("btn_pub_now", lang), callback_data="pub:now")],
         toggle_row,
-        [InlineKeyboardButton("↩ Admin Menu", callback_data="admin:menu")],
+        [InlineKeyboardButton(t("btn_admin_back_menu", lang), callback_data="admin:menu")],
     ])
     return body, kb, ParseMode.MARKDOWN_V2
 
 
 async def _send_publishing_menu(bot, chat_id: int) -> None:
-    text, markup, mode = _publishing_menu_text_and_markup()
+    lang = _user_lang(chat_id)
+    text, markup, mode = _publishing_menu_text_and_markup(lang)
     await bot.send_message(
         chat_id, text, reply_markup=markup, parse_mode=mode,
     )
 
 
-def _build_storefront_picker() -> tuple[str, InlineKeyboardMarkup, None]:
+def _build_storefront_picker(lang: str = "fa") -> tuple[str, InlineKeyboardMarkup, ParseMode]:
     kb = [
         [InlineKeyboardButton(
-            f"{s.display_name} ({s.currency})", callback_data=f"sf:{s.code}",
+            _storefront_display(s.code, lang), callback_data=f"sf:{s.code}",
         )]
         for s in STOREFRONTS.values()
     ]
-    return "Choose a storefront:", InlineKeyboardMarkup(kb), None
+    prompt = t("storefront_picker_prompt", lang)
+    return prompt, InlineKeyboardMarkup(kb), ParseMode.MARKDOWN_V2
 
 
 # ---------- commands (thin wrappers around the builders) ----------
 
 async def storefront_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text, markup, _ = _build_storefront_picker()
-    await update.effective_message.reply_text(text, reply_markup=markup)
+    lang = _user_lang(update.effective_chat.id)
+    text, markup, mode = _build_storefront_picker(lang)
+    await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=mode)
 
 
 async def categories_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -431,18 +476,23 @@ async def outlet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     sf = _user_storefront(chat_id)
     term = " ".join(context.args or []).strip()
     if not term:
         await update.effective_message.reply_text(
-            "Usage: `/search elbise`", parse_mode=ParseMode.MARKDOWN_V2,
+            t("search_usage", lang), parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
     products = db.search_products(sf, term, limit=config.DIGEST_TOP_N)
+    search_title = t("search_title", lang, term=escape_md_v2(term))
+    empty_text = t("search_empty", lang, term=escape_md_v2(term))
     await update.effective_message.reply_text(
         format_product_list(
-            products, title=f"Search: {term}",
-            empty_msg=f"No discounted matches for _{escape_md_v2(term)}_ yet\\.",
+            products,
+            title=search_title,
+            empty_msg=empty_text,
+            lang=lang,
         ),
         parse_mode=ParseMode.MARKDOWN_V2,
         disable_web_page_preview=True,
@@ -452,11 +502,12 @@ async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _execute_discounts(bot, chat_id: int):
     """Core logic to trigger an on-demand scrape and return top results."""
     sf = _user_storefront(chat_id)
+    lang = _user_lang(chat_id)
     store = store_for_storefront(sf)
     await bot.send_message(
         chat_id=chat_id,
-        text=f"Fetching the latest deals from {store.display_name}, "
-        "this may take a few minutes…",
+        text=t("fetching_deals", lang, store_name=escape_md_v2(store.display_name)),
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
 
     async with _scrape_lock:
@@ -471,33 +522,24 @@ async def _execute_discounts(bot, chat_id: int):
                 )
                 _last_scrape_at[sf] = time.time()
                 _spawn_channel_firehose(bot)
-            except Exception as e:
+            except Exception:
                 logger.exception("Scrape failed")
-                from scraper.stores.trendyol.browser import ChromiumDied
-                if isinstance(e, ChromiumDied):
-                    msg = (
-                        "Live refresh couldn't finish this time. "
-                        "Showing the latest cached results if any exist."
-                    )
-                else:
-                    msg = (
-                        "Live refresh failed. "
-                        "Showing the latest cached results if any exist."
-                    )
-                await bot.send_message(chat_id=chat_id, text=msg)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=t("scrape_failed", lang),
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
 
     products = db.top_discounts(sf, limit=config.DIGEST_TOP_N)
+    sf_name = _storefront_display(sf, lang)
     if not products:
-        msg = (
-            f"No products found with ≥30% discount yet.\n\n"
-            f"We found items but they all have smaller discounts. "
-            f"Try again later when bigger sales are available."
-        )
+        msg = t("no_qualifying_discounts", lang, store_name=escape_md_v2(store.display_name))
     else:
         msg = format_product_list(
             products,
-            title=f"Top discounts — {_storefront_display(sf)}",
-            empty_msg="Nothing to show yet\\.",
+            title=t("top_deals_header", lang, storefront=sf_name),
+            empty_msg=t("no_deals_found", lang),
+            lang=lang,
         )
     await bot.send_message(
         chat_id=chat_id,
@@ -512,43 +554,55 @@ async def discounts_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _execute_discounts(context.bot, update.effective_chat.id)
 
 
-
 async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db.add_subscriber(update.effective_chat.id)
+    chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
+    db.add_subscriber(chat_id)
     await update.effective_message.reply_text(
-        f"Subscribed. Daily digest at "
-        f"{config.DAILY_DIGEST_HOUR:02d}:{config.DAILY_DIGEST_MINUTE:02d} (server time)."
+        t("subscribed_success", lang, hour=config.DAILY_DIGEST_HOUR, minute=config.DAILY_DIGEST_MINUTE),
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
 
 
 async def unsubscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db.remove_subscriber(update.effective_chat.id)
-    await update.effective_message.reply_text("Unsubscribed.")
+    chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
+    db.remove_subscriber(chat_id)
+    await update.effective_message.reply_text(
+        t("unsubscribed_success", lang),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
 
 
 async def publish_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only. Flush every pending ≥N% product to the channel."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await update.effective_message.reply_text("Admin only.")
+        await update.effective_message.reply_text(
+            t("admin_only_error", lang),
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
         return
 
     if _channel_lock.locked():
         await update.effective_message.reply_text(
-            "⏳ Channel broadcast is already in progress. Please wait a moment."
+            t("pub_in_progress", lang),
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     candidates = db.list_channel_candidates(config.CHANNEL_MIN_DISCOUNT_PCT)
     if not candidates:
         await update.effective_message.reply_text(
-            f"ℹ️ No new deals pending to publish.\n\n"
-            f"All deals with ≥{config.CHANNEL_MIN_DISCOUNT_PCT}% discount have already been posted to the channel."
+            t("pub_no_candidates", lang, pct=config.CHANNEL_MIN_DISCOUNT_PCT),
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     await update.effective_message.reply_text(
-        f"📤 Publishing {len(candidates)} qualifying deal(s) (≥{config.CHANNEL_MIN_DISCOUNT_PCT}%) to the channel…"
+        t("pub_starting", lang, count=len(candidates), pct=config.CHANNEL_MIN_DISCOUNT_PCT),
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
     try:
         async with _channel_lock:
@@ -556,12 +610,15 @@ async def publish_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("publish failed")
         await update.effective_message.reply_text(
-            "Publish failed — please check server logs."
+            t("pub_failed", lang),
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
     await update.effective_message.reply_text(
-        f"✅ Finished! Posted {posted} product(s) to the channel."
+        t("pub_finished", lang, count=posted),
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
+
 
 
 
@@ -570,17 +627,16 @@ async def publish_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def addstore_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only: Add or update a dynamic store via JSON payload."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await update.effective_message.reply_text("⛔ Admin only.")
+        await update.effective_message.reply_text(t("admin_only_error", lang), parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     raw_text = update.effective_message.text or ""
     parts = raw_text.split(None, 1)
     if len(parts) < 2 or not parts[1].strip():
         await update.effective_message.reply_text(
-            "Usage: `/addstore <JSON>`\n\n"
-            "Send the complete JSON configuration object for the dynamic store\\.\n"
-            "Use `/sample_store` to view templates\\.",
+            t("addstore_usage", lang),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
@@ -639,7 +695,7 @@ async def addstore_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     refresh_dynamic_stores()
 
     await update.effective_message.reply_text(
-        f"✅ Store *{escape_md_v2(code)}* saved and loaded into scraper registry\\!",
+        t("store_saved_success", lang, code=escape_md_v2(code)),
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
@@ -647,27 +703,31 @@ async def addstore_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delstore_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only: Delete a dynamic store by code."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await update.effective_message.reply_text("⛔ Admin only.")
+        await update.effective_message.reply_text(t("admin_only_error", lang), parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     args = context.args or []
     if not args:
         await update.effective_message.reply_text(
-            "Usage: `/delstore <store_code>`",
+            t("delstore_usage", lang),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     code = args[0].strip()
     if not db.get_dynamic_store(code):
-        await update.effective_message.reply_text(f"Store '{code}' not found.")
+        await update.effective_message.reply_text(
+            t("store_not_found", lang, code=escape_md_v2(code)),
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
         return
 
     db.delete_dynamic_store(code)
     refresh_dynamic_stores()
     await update.effective_message.reply_text(
-        f"🗑 Store *{escape_md_v2(code)}* deleted from dynamic stores\\.",
+        t("store_deleted_success", lang, code=escape_md_v2(code)),
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
@@ -675,9 +735,11 @@ async def delstore_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def sample_store_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin-only: Show copy-pasteable store configuration templates."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await update.effective_message.reply_text("⛔ Admin only.")
+        await update.effective_message.reply_text(t("admin_only_error", lang), parse_mode=ParseMode.MARKDOWN_V2)
         return
+
 
     sample_api = {
         "code": "dummyjson",
@@ -743,10 +805,11 @@ async def sample_store_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Claim admin status in chat using the configured admin password."""
     chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
     args = context.args or []
     if not args:
         await update.effective_message.reply_text(
-            "Usage: `/admin_login <password>`", parse_mode=ParseMode.MARKDOWN_V2
+            t("admin_login_usage", lang), parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
@@ -760,17 +823,30 @@ async def admin_login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.link_chat_to_user(chat_id, admin_id)
 
         # Instantly transform to Admin View!
-        text, kb, mode = _admin_menu_text_and_markup()
-        user_name = update.effective_user.first_name or "Admin"
+        text, kb, mode = _admin_menu_text_and_markup(lang)
+        user_name = update.effective_user.first_name or ("مدیر" if lang == "fa" else "Admin")
         await update.effective_message.reply_text(
-            f"👑 *Admin Mode Activated\\!*\n\n"
+            f"{t('admin_login_success', lang)}\n\n"
             f"*Welcome, Administrator {escape_md_v2(user_name)}*\n\n" + text,
             reply_markup=kb,
             parse_mode=mode,
         )
     else:
-        await update.effective_message.reply_text("❌ Incorrect admin password.")
+        await update.effective_message.reply_text(t("admin_login_invalid", lang))
 
+
+async def admin_logout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Demote current chat back to regular customer mode."""
+    chat_id = update.effective_chat.id
+    lang = _user_lang(chat_id)
+    from db.sqlite_backend import _conn
+    with _conn() as c:
+        c.execute("DELETE FROM chat_links WHERE chat_id = ?", (chat_id,))
+    await update.effective_message.reply_text(
+        t("admin_logged_out", lang),
+        reply_markup=_customer_keyboard(is_admin=False, lang=lang),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
 
 
 # ---------- callback query (buttons) ----------
@@ -780,6 +856,29 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     data = q.data or ""
     chat_id = q.message.chat_id
+    lang = _user_lang(chat_id)
+
+    if data.startswith("lang:"):
+        chosen = data[len("lang:"):]
+        if chosen in ("fa", "en"):
+            db.set_language_pref(chat_id, chosen)
+            sf = _user_storefront(chat_id)
+            is_admin = _is_admin(chat_id)
+            user_name = q.from_user.first_name or ("خریدار" if chosen == "fa" else "Shopper")
+
+            ack_text = t("lang_changed", chosen)
+            header = t("welcome_header", chosen, name=escape_md_v2(user_name))
+            sf_line = t("storefront_label", chosen, storefront=escape_md_v2(_storefront_display(sf, chosen)))
+            role_line = f"\n{t('role_admin', chosen)}" if is_admin else ""
+            subtext = t("welcome_subtext", chosen)
+
+            full_text = f"{ack_text}\n\n{header}\n{sf_line}{role_line}\n\n{subtext}"
+            await q.edit_message_text(
+                full_text,
+                reply_markup=_customer_keyboard(is_admin=is_admin, lang=chosen),
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        return
 
     if data.startswith("menu:"):
         await _handle_menu(context, chat_id, data[len("menu:"):])
@@ -798,8 +897,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         code = LEGACY_STOREFRONT_CODES.get(code, code)
         if code in STOREFRONTS:
             db.set_storefront_pref(chat_id, code)
+            msg = t("storefront_switched", lang, storefront=escape_md_v2(_storefront_display(code, lang)))
             await q.edit_message_text(
-                f"Storefront set to *{escape_md_v2(_storefront_display(code))}*\\.",
+                msg,
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
         return
@@ -819,17 +919,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             rows = db.list_child_categories(int(target))
         if not rows:
-            await q.edit_message_text("No sub-categories.")
+            await q.edit_message_text(t("categories_empty", lang))
             return
         await q.edit_message_text(
-            "Choose a category:",
+            t("categories_title", lang),
             reply_markup=_category_keyboard(rows),
+            parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
 
 async def _handle_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, action: str) -> None:
     bot = context.bot
+    lang = _user_lang(chat_id)
 
     if action == "top":
         text, markup, mode = _build_top(chat_id)
@@ -838,21 +940,28 @@ async def _handle_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, action:
     elif action == "categories":
         text, markup, mode = _build_categories(chat_id)
     elif action == "storefront":
-        text, markup, mode = _build_storefront_picker()
+        text, markup, mode = _build_storefront_picker(lang)
+    elif action == "language":
+        await bot.send_message(
+            chat_id,
+            t("lang_picker_prompt", "fa"),
+            reply_markup=_language_keyboard(),
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
     elif action == "discounts":
         await _execute_discounts(bot, chat_id)
         return
     elif action == "search":
         await bot.send_message(
             chat_id,
-            "Send `/search <term>` — e.g. `/search elbise`\\.",
+            t("search_usage", lang),
             parse_mode=ParseMode.MARKDOWN_V2,
-
         )
         return
     elif action == "publish":
         if not _is_admin(chat_id):
-            await bot.send_message(chat_id, "Admin only.")
+            await bot.send_message(chat_id, t("admin_only_error", lang), parse_mode=ParseMode.MARKDOWN_V2)
             return
         await _send_publishing_menu(bot, chat_id)
         return
@@ -872,43 +981,43 @@ async def _handle_publish_action(
     context: ContextTypes.DEFAULT_TYPE, query, chat_id: int, action: str,
 ) -> None:
     bot = context.bot
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await query.answer("Admin only.", show_alert=True)
+        await query.answer(t("admin_only_error", lang), show_alert=True)
         return
 
     if action == "now":
         if _channel_lock.locked():
-            await query.answer("⏳ Channel broadcast is already in progress...", show_alert=True)
+            await query.answer(t("pub_in_progress", lang), show_alert=True)
             return
 
         candidates = db.list_channel_candidates(config.CHANNEL_MIN_DISCOUNT_PCT)
         if not candidates:
             await query.answer(
-                f"ℹ️ No new deals pending. All qualifying deals (≥{config.CHANNEL_MIN_DISCOUNT_PCT}%) are already posted!",
+                t("pub_no_candidates", lang, pct=config.CHANNEL_MIN_DISCOUNT_PCT),
                 show_alert=True,
             )
             return
 
         await query.edit_message_text(
-            f"📤 Publishing {len(candidates)} qualifying product(s) (≥{config.CHANNEL_MIN_DISCOUNT_PCT}%) to the channel…"
+            t("pub_starting", lang, count=len(candidates), pct=config.CHANNEL_MIN_DISCOUNT_PCT)
         )
         try:
             async with _channel_lock:
                 posted = await channel.post_qualifying_deals(bot)
         except Exception:
             logger.exception("publish (button) failed")
-            await bot.send_message(chat_id, "Publish failed — check server logs.")
+            await bot.send_message(chat_id, t("pub_failed", lang))
             return
         await bot.send_message(
-            chat_id, f"✅ Finished! Posted {posted} product(s) to the channel.",
+            chat_id, t("pub_finished", lang, count=posted),
         )
         return
-
 
     if action in _PUBLISH_MODES:
         _set_publish_mode(action)
         logger.info("Publish mode set to %s by chat %s", action, chat_id)
-        text, markup, mode = _publishing_menu_text_and_markup()
+        text, markup, mode = _publishing_menu_text_and_markup(lang)
         await query.edit_message_text(
             text, reply_markup=markup, parse_mode=mode,
         )
@@ -920,22 +1029,23 @@ async def _handle_publish_action(
 async def _handle_admin_action(
     context: ContextTypes.DEFAULT_TYPE, query, chat_id: int, action: str,
 ) -> None:
+    lang = _user_lang(chat_id)
     if not _is_admin(chat_id):
-        await query.answer("Admin only.", show_alert=True)
+        await query.answer(t("admin_only_error", lang), show_alert=True)
         return
 
     if action == "menu":
-        text, kb, mode = _admin_menu_text_and_markup()
+        text, kb, mode = _admin_menu_text_and_markup(lang)
         await query.edit_message_text(text, reply_markup=kb, parse_mode=mode)
         return
 
     if action == "stores":
-        text, kb, mode = _build_stores_list_keyboard()
+        text, kb, mode = _build_stores_list_keyboard(lang)
         await query.edit_message_text(text, reply_markup=kb, parse_mode=mode)
         return
 
     if action == "scrape_all":
-        await query.answer("🚀 Starting scrape across all storefronts in background...", show_alert=True)
+        await query.answer(t("scrape_all_starting", lang), show_alert=True)
         async def _run_scrape_all():
             async with _scrape_lock:
                 for sf_code in STOREFRONTS.keys():
@@ -949,13 +1059,13 @@ async def _handle_admin_action(
                     except Exception:
                         logger.exception("Admin scrape all failed for %s", sf_code)
             _spawn_channel_firehose(context.bot)
-            await context.bot.send_message(chat_id, "✅ Background scrape of all storefronts completed!")
+            await context.bot.send_message(chat_id, t("scrape_all_done", lang))
         asyncio.create_task(_run_scrape_all())
         return
 
     if action.startswith("store:"):
         code = action[len("store:"):]
-        text, kb, mode = _build_store_detail(code)
+        text, kb, mode = _build_store_detail(code, lang)
         await query.edit_message_text(text, reply_markup=kb, parse_mode=mode)
         return
 
@@ -966,7 +1076,7 @@ async def _handle_admin_action(
             new_state = not bool(store.get("enabled", 1))
             db.set_dynamic_store_enabled(code, new_state)
             refresh_dynamic_stores()
-            text, kb, mode = _build_store_detail(code)
+            text, kb, mode = _build_store_detail(code, lang)
             await query.edit_message_text(text, reply_markup=kb, parse_mode=mode)
         return
 
@@ -975,13 +1085,13 @@ async def _handle_admin_action(
         db.delete_dynamic_store(code)
         refresh_dynamic_stores()
         await query.answer(f"Store '{code}' deleted.", show_alert=True)
-        text, kb, mode = _build_stores_list_keyboard()
+        text, kb, mode = _build_stores_list_keyboard(lang)
         await query.edit_message_text(text, reply_markup=kb, parse_mode=mode)
         return
 
     if action == "reload":
         loaded = refresh_dynamic_stores()
-        await query.answer(f"Registry reloaded: {loaded} store(s) active.", show_alert=True)
+        await query.answer(t("registry_reloaded", lang), show_alert=True)
         return
 
     if action == "add_guide":
@@ -993,8 +1103,8 @@ async def _handle_admin_action(
             "You can also declare stores in your `.env` file with `STORE_<NAME>`\\."
         )
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📋 View Templates", callback_data="admin:samples")],
-            [InlineKeyboardButton("↩ Admin Menu", callback_data="admin:menu")],
+            [InlineKeyboardButton(t("btn_admin_templates", lang), callback_data="admin:samples")],
+            [InlineKeyboardButton(t("btn_admin_back_menu", lang), callback_data="admin:menu")],
         ])
         await query.edit_message_text(guide_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN_V2)
         return
@@ -1005,20 +1115,16 @@ async def _handle_admin_action(
 
     if action == "customer_view":
         sf = _user_storefront(chat_id)
-        text = (
-            f"👁 *Customer Deals View Preview*\n"
-            f"Storefront: *{escape_md_v2(_storefront_display(sf))}*\n\n"
-            "This is the exact deals menu regular customers see in the bot\\."
-        )
+        text = t("customer_view_preview_text", lang, storefront=escape_md_v2(_storefront_display(sf, lang)))
         await query.edit_message_text(
             text,
-            reply_markup=_admin_customer_keyboard(),
+            reply_markup=_admin_customer_keyboard(lang=lang),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     if action == "back_main":
-        text, kb, mode = _admin_menu_text_and_markup()
+        text, kb, mode = _admin_menu_text_and_markup(lang)
         await query.edit_message_text(
             text,
             reply_markup=kb,
@@ -1027,34 +1133,35 @@ async def _handle_admin_action(
         return
 
 
-
-
 async def _render_category(query, cat_id: int, page: int):
+    chat_id = query.message.chat_id
+    lang = _user_lang(chat_id)
     offset = page * config.PAGE_SIZE
     products = db.products_in_category(cat_id, offset=offset, limit=config.PAGE_SIZE)
     total = db.count_products_in_category(cat_id)
     cat = db.get_category(cat_id)
-    title = cat["breadcrumb"] if cat else "Category"
+    title = cat["breadcrumb"] if cat else ("دسته‌بندی" if lang == "fa" else "Category")
 
     if total == 0:
         await query.edit_message_text(
-            f"No discounted products in *{escape_md_v2(title)}* yet\\.",
+            t("category_no_products", lang, title=escape_md_v2(title)),
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
-    body = format_product_list(products, title=f"{title}  (page {page + 1})")
+    page_label = t("page_label", lang, page=page + 1)
+    body = format_product_list(products, title=f"{title} ({page_label})", lang=lang)
 
     total_pages = (total + config.PAGE_SIZE - 1) // config.PAGE_SIZE
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅ Prev", callback_data=f"cat:{cat_id}:{page - 1}"))
+        nav_row.append(InlineKeyboardButton(t("btn_prev", lang), callback_data=f"cat:{cat_id}:{page - 1}"))
     if page + 1 < total_pages:
-        nav_row.append(InlineKeyboardButton("Next ➡", callback_data=f"cat:{cat_id}:{page + 1}"))
+        nav_row.append(InlineKeyboardButton(t("btn_next", lang), callback_data=f"cat:{cat_id}:{page + 1}"))
     kb_rows = []
     if nav_row:
         kb_rows.append(nav_row)
-    kb_rows.append([InlineKeyboardButton("↩ Categories", callback_data="catnav:root")])
+    kb_rows.append([InlineKeyboardButton(t("btn_back_categories", lang), callback_data="catnav:root")])
     reply_markup = InlineKeyboardMarkup(kb_rows)
 
     await query.edit_message_text(
@@ -1063,15 +1170,6 @@ async def _render_category(query, cat_id: int, page: int):
         disable_web_page_preview=True,
         reply_markup=reply_markup,
     )
-
-
-def _category_keyboard(rows: list[dict]) -> InlineKeyboardMarkup:
-    kb: list[list[InlineKeyboardButton]] = []
-    for r in rows:
-        count = r.get("product_count", 0)
-        label = f"{r['name']} ({count})" if count else r["name"]
-        kb.append([InlineKeyboardButton(label, callback_data=f"cat:{r['id']}:0")])
-    return InlineKeyboardMarkup(kb)
 
 
 # ---------- auto-publish worker ----------
@@ -1126,15 +1224,19 @@ async def daily_digest_job(context: ContextTypes.DEFAULT_TYPE):
 
     for sub in db.list_subscribers():
         chat_id = sub["chat_id"]
+        lang = _user_lang(chat_id)
         sf = sub["storefront_pref"]
         products = db.top_discounts(sf, limit=config.DIGEST_TOP_N)
+        title = t("daily_digest_header", lang, storefront=_storefront_display(sf, lang))
+        empty = t("no_deals_found", lang)
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=format_product_list(
                     products,
-                    title=f"Daily discounts — {_storefront_display(sf)}",
-                    empty_msg="Nothing to show today\\.",
+                    title=title,
+                    empty_msg=empty,
+                    lang=lang,
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
                 disable_web_page_preview=True,
@@ -1151,6 +1253,8 @@ def _build_application() -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("language", language_cmd))
+    app.add_handler(CommandHandler("lang", language_cmd))
     app.add_handler(CommandHandler("storefront", storefront_cmd))
     app.add_handler(CommandHandler("categories", categories_cmd))
     app.add_handler(CommandHandler("top", top_cmd))
@@ -1162,10 +1266,12 @@ def _build_application() -> Application:
     app.add_handler(CommandHandler("publish", publish_cmd))
     app.add_handler(CommandHandler("admin", admin_cmd))
     app.add_handler(CommandHandler("admin_login", admin_login_cmd))
+    app.add_handler(CommandHandler("admin_logout", admin_logout_cmd))
     app.add_handler(CommandHandler("addstore", addstore_cmd))
     app.add_handler(CommandHandler("delstore", delstore_cmd))
     app.add_handler(CommandHandler("sample_store", sample_store_cmd))
     app.add_handler(CallbackQueryHandler(on_callback))
+
 
     app.job_queue.run_daily(
         daily_digest_job,

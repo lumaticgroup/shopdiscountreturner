@@ -12,6 +12,7 @@ from .sqlite_backend import (
     delete_dynamic_store,
     get_category,
     get_dynamic_store,
+    get_language_pref,
     get_products_by_ids,
     get_scrape_cursor,
     get_session,
@@ -33,6 +34,7 @@ from .sqlite_backend import (
     role_for_chat,
     search_products,
     set_dynamic_store_enabled,
+    set_language_pref,
     set_scrape_cursor,
     set_setting,
     set_storefront_pref,
@@ -68,6 +70,9 @@ __all__ = [
     "list_subscribers",
     "get_storefront_pref",
     "set_storefront_pref",
+    "get_language_pref",
+    "set_language_pref",
+
     # diagnostics
     "counts_by_storefront",
     # channel firehose
