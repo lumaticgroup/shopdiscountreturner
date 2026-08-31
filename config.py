@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-DB_PATH = os.environ.get("DB_PATH", "trendyol.db")
+DB_PATH = os.environ.get("DB_PATH", "discounts.db")
 
 # Daily digest time (server local time)
 DAILY_DIGEST_HOUR = int(os.environ.get("DAILY_DIGEST_HOUR", "9"))
@@ -40,17 +40,25 @@ TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "").strip()
 CHANNEL_MIN_DISCOUNT_PCT = int(os.environ.get("CHANNEL_MIN_DISCOUNT_PCT", "35"))
 CHANNEL_POST_RATE_PER_MIN = int(os.environ.get("CHANNEL_POST_RATE_PER_MIN", "20"))
 
-# Mini App (Telegram WebApp) — hosted by FastAPI in this same process.
-# Telegram requires HTTPS: use ngrok for dev, Caddy/nginx for prod.
-WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL", "").strip()
-WEBAPP_HOST = os.environ.get("WEBAPP_HOST", "0.0.0.0")
-WEBAPP_PORT = int(os.environ.get("WEBAPP_PORT", "8000"))
+# Auto-publish worker: when the admin sets publish_mode=auto in the bot, this
+# interval controls how often the scheduler re-scrapes every storefront and
+# drains the channel queue. Runs unconditionally on the JobQueue but no-ops
+# unless publish_mode is 'auto', so changing the mode is instantaneous.
+AUTO_PUBLISH_INTERVAL_MINUTES = int(
+    os.environ.get("AUTO_PUBLISH_INTERVAL_MINUTES", "90")
+)
 
-# JWT signing key. Rotate to invalidate all outstanding sessions.
-WEBAPP_SECRET = os.environ.get("WEBAPP_SECRET", "")
-SESSION_TTL_HOURS = int(os.environ.get("SESSION_TTL_HOURS", "168"))  # 7 days
+# Dynamic admin authorization
+# Comma-separated list of Telegram user chat IDs with admin privileges
+_raw_admin_ids = os.environ.get("ADMIN_CHAT_IDS", "").strip()
+ADMIN_CHAT_IDS: set[int] = {
+    int(x.strip())
+    for x in _raw_admin_ids.split(",")
+    if x.strip().isdigit()
+}
 
-# First-admin seed. When these are set and there's no admin in the DB, the
-# bot seeds this user once at startup. Leave blank to skip.
+# Optional admin password for claiming admin rights in chat via /admin_login <password>
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")).strip()
 BOOTSTRAP_ADMIN_EMAIL = os.environ.get("BOOTSTRAP_ADMIN_EMAIL", "").strip()
-BOOTSTRAP_ADMIN_PASSWORD = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+BOOTSTRAP_ADMIN_PASSWORD = ADMIN_PASSWORD
+

@@ -16,9 +16,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source. .dockerignore keeps .env, .venv, *.db, etc. out of the image.
 COPY . .
 
-# FastAPI Mini App port. justrunmy.app maps the container port to HTTPS.
-EXPOSE 8000
-
-# Env comes from justrunmy.app dashboard, not baked into the image.
-# TELEGRAM_BOT_TOKEN, WEBAPP_BASE_URL, WEBAPP_SECRET, etc. — set them there.
+# Start the Telegram Bot process
 CMD ["python", "bot.py"]

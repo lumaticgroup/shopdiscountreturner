@@ -5,7 +5,6 @@ deeper discount than when we last posted it).
 
 De-dup lives in the `channel_posts` DB table; the poster is idempotent.
 """
-from __future__ import annotations
 
 import asyncio
 import logging

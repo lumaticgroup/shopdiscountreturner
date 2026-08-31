@@ -23,12 +23,11 @@ Spec shape (see .env.example for a full example):
 Malformed entries are logged and skipped — a bad env var never crashes the
 bot.
 """
-from __future__ import annotations
 
 import json
 import logging
 import os
-from typing import Iterable
+from typing import Iterable, Optional
 
 logger = logging.getLogger("env_stores")
 
@@ -39,7 +38,7 @@ REQUIRED_TOP_LEVEL = (
 ALLOWED_FLOW_TYPES = {"api", "header"}
 
 
-def load_env_stores(environ: dict | None = None) -> list[dict]:
+def load_env_stores(environ: Optional[dict] = None) -> list[dict]:
     """
     Return one spec dict per valid `STORE_*` env var.
 
@@ -60,7 +59,7 @@ def load_env_stores(environ: dict | None = None) -> list[dict]:
     return specs
 
 
-def _parse_one(env_key: str, raw: str) -> dict | None:
+def _parse_one(env_key: str, raw: str) -> Optional[dict]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:

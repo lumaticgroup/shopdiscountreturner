@@ -13,7 +13,6 @@ Extracted from `scraper/stores/trendyol/browser.py`, which is now a thin
 Trendyol-specific adapter over this class. The container-safety notes
 (memory flags, OOM diagnostics) carry over unchanged.
 """
-from __future__ import annotations
 
 import asyncio
 import logging

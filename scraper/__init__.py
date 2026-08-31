@@ -5,7 +5,6 @@ Every store lives under `scraper/stores/<code>/` and registers itself in
 the registry at `scraper.stores`. This module is a thin dispatcher: given
 a storefront code, look up which store owns it and delegate.
 """
-from __future__ import annotations
 
 import asyncio
 import logging

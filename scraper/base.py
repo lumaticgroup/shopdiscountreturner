@@ -10,7 +10,6 @@ variant with its own code, display name, currency, and the owning store's
 code. Stores are free to subclass it with vendor-specific fields (see
 `scraper/stores/trendyol/storefronts.py: TrendyolStorefront`).
 """
-from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass

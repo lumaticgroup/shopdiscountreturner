@@ -330,7 +330,8 @@ def list_channel_candidates(min_discount_pct: int) -> list[dict]:
         rows = c.execute(
             """SELECT p.storefront, p.product_id, p.name, p.brand, p.url,
                       p.image_url, p.price, p.original_price, p.discount_pct,
-                      p.currency, cat.breadcrumb AS category_breadcrumb
+                      p.currency, p.is_outlet,
+                      cat.breadcrumb AS category_breadcrumb
                  FROM products p
                  LEFT JOIN categories cat ON cat.id = p.category_id
                  LEFT JOIN channel_posts cp
@@ -393,6 +394,26 @@ def set_scrape_cursor(storefront: str, next_breadcrumb: Optional[str]) -> None:
                    next_breadcrumb = excluded.next_breadcrumb,
                    updated_at = excluded.updated_at""",
             (storefront, next_breadcrumb, now),
+        )
+
+
+# ---------- Settings (key/value) ----------
+
+
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with _conn() as c:
+        r = c.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,),
+        ).fetchone()
+        return r["value"] if r else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO settings (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (key, value),
         )
 
 
@@ -557,6 +578,15 @@ def upsert_dynamic_store(
 def delete_dynamic_store(code: str) -> None:
     with _conn() as c:
         c.execute("DELETE FROM dynamic_stores WHERE code = ?", (code,))
+
+
+def set_dynamic_store_enabled(code: str, enabled: bool) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as c:
+        c.execute(
+            "UPDATE dynamic_stores SET enabled = ?, updated_at = ? WHERE code = ?",
+            (1 if enabled else 0, now, code),
+        )
 
 
 # ---------- Product batch fetch (send-to-channel) ----------

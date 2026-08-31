@@ -9,7 +9,6 @@ we walk it here to produce top-level `ScrapedCategory` nodes.
 Deeper depth is grown lazily: when a listing scrape returns a product,
 its breadcrumb hints at the full path, and `persist_tree` can back-fill.
 """
-from __future__ import annotations
 
 import logging
 import re

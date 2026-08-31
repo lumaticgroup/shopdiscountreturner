@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS channel_posts (
 CREATE INDEX IF NOT EXISTS idx_channel_posts_posted_at
     ON channel_posts(posted_at);
 
+-- Small key/value store for admin-managed runtime settings that need to
+-- persist across restarts (e.g. channel publish_mode = manual|auto).
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Per-storefront resume point for scrapers that get cut short by rate
 -- limiting (Shein's /risk/action/limit). Stores the breadcrumb of the
 -- category where the run was blocked; the next run rotates its category

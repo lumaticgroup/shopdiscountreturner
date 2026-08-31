@@ -4,13 +4,13 @@ Trendyol store module. Owns the `trendyol_tr` (Turkey/TL) and
 Playwright browser context and call the internal search API through
 `page.evaluate(fetch(...))`. See browser.py, categories.py, api.py.
 """
-from __future__ import annotations
 
 import logging
 from typing import Optional
 
 import db
 from scraper.base import Storefront, StoreScraper
+from scraper.categories import is_outlet_category
 
 from . import api, browser, categories as cat_mod
 from .storefronts import LEGACY_CODES as LEGACY_STOREFRONT_CODES  # noqa: F401 — picked up by registry discovery
@@ -71,8 +71,11 @@ class TrendyolStore(StoreScraper):
                     max_pages=max_pages_per_category,
                 )
                 stored_id = cat_id_map.get(cat.breadcrumb)
+                outlet = is_outlet_category(cat.name, cat.listing_path)
                 for p in products:
                     p.category_id = stored_id
+                    if outlet:
+                        p.is_outlet = True
                     all_products[(p.storefront, p.product_id)] = p
 
         products_list = list(all_products.values())

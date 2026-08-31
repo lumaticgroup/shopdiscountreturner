@@ -25,13 +25,12 @@ Config shape (mirrors `dynamic_stores.config_json`):
 `headers` and `cookies` keys are only honoured by `GenericHeaderStore` —
 the API flow uses httpx defaults.
 """
-from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import random
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Optional
 from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
@@ -40,6 +39,7 @@ from jsonpath_ng.ext import parse as jp_parse
 import config
 import db
 from scraper.base import Storefront, StoreScraper
+from scraper.categories import is_outlet_category
 from scraper.models import ScrapedProduct
 
 logger = logging.getLogger("scraper.generic")
@@ -85,6 +85,12 @@ class GenericAPIStore(StoreScraper):
             name: jp_parse(path)
             for name, path in (self._config.get("fields") or {}).items()
         }
+        # Dynamic stores are one-URL-per-store; if the admin pointed us at an
+        # outlet/clearance endpoint, every product from that endpoint is an
+        # outlet product. Detect once at init instead of per-item.
+        self._is_outlet = is_outlet_category(
+            display_name, self._config.get("list_url"),
+        )
 
     @property
     def storefronts(self) -> list[Storefront]:
@@ -177,7 +183,7 @@ class GenericAPIStore(StoreScraper):
     def _extract_items(self, payload: Any) -> list[Any]:
         return [m.value for m in self._items_expr.find(payload)]
 
-    def _to_product(self, item: Any) -> ScrapedProduct | None:
+    def _to_product(self, item: Any) -> Optional[ScrapedProduct]:
         def get(field: str) -> Any:
             expr = self._field_exprs.get(field)
             if expr is None:
@@ -217,11 +223,11 @@ class GenericAPIStore(StoreScraper):
             discount_pct=discount_pct,
             currency=self._storefront.currency,
             category_id=None,
-            is_outlet=False,
+            is_outlet=self._is_outlet,
         )
 
 
-def _to_float(v: Any) -> float | None:
+def _to_float(v: Any) -> Optional[float]:
     if v is None:
         return None
     try:
@@ -230,7 +236,7 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
-def _to_int(v: Any) -> int | None:
+def _to_int(v: Any) -> Optional[int]:
     if v is None:
         return None
     try:

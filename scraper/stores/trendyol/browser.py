@@ -13,7 +13,6 @@ and the apigw.trendyol.com URL/identity-param construction.
 Public surface (`PlaywrightSession.warm_storefront` / `.fetch_api_json`,
 `ChromiumDied`) is unchanged from before the extraction.
 """
-from __future__ import annotations
 
 import logging
 from typing import Any, Optional

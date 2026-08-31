@@ -8,7 +8,6 @@ Two ways to use this:
 Idempotent: does nothing if an admin already exists, or if the email is
 already taken. Prints what it did (or didn't).
 """
-from __future__ import annotations
 
 import logging
 import sys

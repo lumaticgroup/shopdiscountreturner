@@ -17,7 +17,6 @@ before attempting tier 2 and keeps whatever it gathered.
 Discount filtering happens in `api._to_product` (items below
 MIN_DISCOUNT_PCT are dropped).
 """
-from __future__ import annotations
 
 import logging
 

@@ -3,7 +3,6 @@ Product-search API path. Hits Trendyol's internal search service through
 the browser context managed by `PlaywrightSession`, since Cloudflare's
 bot check refuses raw HTTP clients.
 """
-from __future__ import annotations
 
 import logging
 from typing import Optional

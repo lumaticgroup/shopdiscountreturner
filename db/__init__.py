@@ -15,6 +15,7 @@ from .sqlite_backend import (
     get_products_by_ids,
     get_scrape_cursor,
     get_session,
+    get_setting,
     get_storefront_pref,
     get_user,
     get_user_by_email,
@@ -31,7 +32,9 @@ from .sqlite_backend import (
     revoke_session,
     role_for_chat,
     search_products,
+    set_dynamic_store_enabled,
     set_scrape_cursor,
+    set_setting,
     set_storefront_pref,
     set_user_password,
     set_user_role,
@@ -73,6 +76,9 @@ __all__ = [
     # scrape cursors
     "get_scrape_cursor",
     "set_scrape_cursor",
+    # runtime settings (key/value)
+    "get_setting",
+    "set_setting",
     # users / auth
     "create_user",
     "get_user_by_email",
@@ -93,4 +99,6 @@ __all__ = [
     "get_dynamic_store",
     "upsert_dynamic_store",
     "delete_dynamic_store",
+    "set_dynamic_store_enabled",
 ]
+

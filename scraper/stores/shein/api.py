@@ -10,7 +10,6 @@ navigation lands on `/risk/challenge` and we raise `RiskChallenged` so the
 store can abort that storefront gracefully instead of hammering N more
 pages into the same wall.
 """
-from __future__ import annotations
 
 import logging
 from typing import Any, Optional

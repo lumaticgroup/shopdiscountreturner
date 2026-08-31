@@ -5,7 +5,6 @@ risk-control-gated, no callable public API — we warm a Playwright browser
 context and extract the SSR goods state from listing-page navigations.
 See api.py, categories.py.
 """
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -14,7 +13,7 @@ from typing import Optional
 
 import db
 from scraper.base import Storefront, StoreScraper
-from scraper.categories import persist_tree
+from scraper.categories import is_outlet_category, persist_tree
 
 from . import api
 from . import categories as cat_mod
@@ -130,8 +129,11 @@ class SheinStore(StoreScraper):
                     break
 
                 stored_id = cat_id_map.get(cat.breadcrumb)
+                outlet = is_outlet_category(cat.name, cat.listing_path)
                 for p in products:
                     p.category_id = stored_id
+                    if outlet:
+                        p.is_outlet = True
                     all_products[(p.storefront, p.product_id)] = p
 
             if not challenged and not dry_run:

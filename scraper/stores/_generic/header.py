@@ -9,7 +9,6 @@ For sites protected by Cloudflare bot management (Trendyol-class), header
 tweaks aren't enough — you need a warmed browser context. Those get their
 own dedicated store module under `scraper/stores/<name>/`.
 """
-from __future__ import annotations
 
 import json
 import logging

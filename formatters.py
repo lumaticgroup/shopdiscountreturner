@@ -7,7 +7,6 @@ Telegram's MarkdownV2 requires escaping these chars in general text:
     _ * [ ] ( ) ~ ` > # + - = | { } . !
 Inside `[link text](url)`, the URL must escape `)` and `\\`.
 """
-from __future__ import annotations
 
 from typing import Iterable
 
@@ -83,8 +82,12 @@ def format_channel_caption(row: dict, store_display_name: str) -> str:
 
     was = f"{orig:.2f} {currency}".strip() if orig else ""
     now = f"{price:.2f} {currency}".strip() if price else ""
+    outlet = bool(row.get("is_outlet"))
 
-    lines = [f"🔥 *\\-{pct}%*", f"*{escape_md_v2(name)}*"]
+    # Outlet items get a distinct top-line badge so the channel reads
+    # "regular deal" vs "clearance find" at a glance.
+    head = f"🏷 *\\-{pct}% Outlet*" if outlet else f"🔥 *\\-{pct}%*"
+    lines = [head, f"*{escape_md_v2(name)}*"]
     if brand:
         lines.append(escape_md_v2(brand))
     lines.append("")
@@ -106,7 +109,7 @@ def format_categories(rows: Iterable[dict]) -> str:
         f"• *{escape_md_v2(r['name'])}* — {r.get('product_count', 0)} items"
         for r in rows
     ]
-    return "\n".join(lines) if lines else "No categories yet — run a scrape first\\."
+    return "\n".join(lines) if lines else "No categories yet — run /discounts first\\."
 
 
 def format_help(storefront_display: str) -> str:

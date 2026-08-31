@@ -12,13 +12,13 @@ Usage:
     python -m scripts.inspect_page --storefront trendyol_uae --save homepage.html
     python -m scripts.inspect_page --storefront shein_tr
 """
-from __future__ import annotations
 
 import argparse
 import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -31,7 +31,7 @@ async def _save_html(page, path: str) -> None:
     print(f"Saved {len(html):,} chars of rendered HTML to {path}")
 
 
-async def inspect_trendyol(storefront_code: str, save: str | None) -> None:
+async def inspect_trendyol(storefront_code: str, save: Optional[str]) -> None:
     from scraper.stores.trendyol.browser import PlaywrightSession
     from scraper.stores.trendyol.categories import (
         parse_top_level_from_nav_props,
@@ -68,7 +68,7 @@ def _print_sample(products, raw_items) -> None:
         print(f"      image: {p.image_url}")
 
 
-async def inspect_shein(storefront_code: str, save: str | None) -> None:
+async def inspect_shein(storefront_code: str, save: Optional[str]) -> None:
     from scraper.stores._browser import BrowserSession
     from scraper.stores.shein import api
     from scraper.stores.shein.categories import LISTINGS

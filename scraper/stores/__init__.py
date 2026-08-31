@@ -12,7 +12,6 @@ they don't have a package on disk. Sub-packages whose name starts with
 `_` are treated as private (holding shared implementation, not a store)
 and skipped by discovery.
 """
-from __future__ import annotations
 
 import importlib
 import json
