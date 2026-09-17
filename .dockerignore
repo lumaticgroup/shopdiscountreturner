@@ -39,3 +39,6 @@ tests
 scripts/deploy_*.sh
 Dockerfile
 .dockerignore
+
+# Volume data
+data/
