@@ -15,6 +15,7 @@ Telegram bot. Owns:
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -802,19 +803,90 @@ async def sample_store_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# Brute-force protection for /admin_login
+_MAX_LOGIN_ATTEMPTS = 5
+_LOCKOUT_WINDOW_SECONDS = 900  # 15 minutes
+_LOGIN_ATTEMPTS: dict[int, list[float]] = {}
+
+
+def _check_login_rate_limit(chat_id: int) -> tuple[bool, int]:
+    """Check if chat_id has exceeded login attempts.
+    Returns (is_allowed, remaining_cooldown_seconds).
+    """
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS.get(chat_id, [])
+    valid_attempts = [t for t in attempts if now - t < _LOCKOUT_WINDOW_SECONDS]
+    _LOGIN_ATTEMPTS[chat_id] = valid_attempts
+    if len(valid_attempts) >= _MAX_LOGIN_ATTEMPTS:
+        oldest = valid_attempts[0]
+        cooldown = int(_LOCKOUT_WINDOW_SECONDS - (now - oldest))
+        return False, max(1, cooldown)
+    return True, 0
+
+
+def _record_failed_login(chat_id: int) -> None:
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS.get(chat_id, [])
+    attempts.append(now)
+    _LOGIN_ATTEMPTS[chat_id] = attempts
+
+
+def _clear_login_attempts(chat_id: int) -> None:
+    _LOGIN_ATTEMPTS.pop(chat_id, None)
+
+
 async def admin_login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Claim admin status in chat using the configured admin password."""
     chat_id = update.effective_chat.id
     lang = _user_lang(chat_id)
+
+    # 1. Purge the message containing the password from Telegram chat for security
+    try:
+        if update.effective_message:
+            await update.effective_message.delete()
+    except Exception as e:
+        logger.debug(f"Could not delete admin login message: {e}")
+
+    # 2. Check brute-force lockout
+    allowed, cooldown = _check_login_rate_limit(chat_id)
+    if not allowed:
+        mins = (cooldown + 59) // 60
+        lockout_msg = (
+            f"⛔ *Too many failed attempts*\\.\n\n"
+            f"Please wait *{mins} {'minutes' if mins > 1 else 'minute'}* before trying `/admin_login` again\\."
+            if lang != "fa"
+            else
+            f"⛔ *تعداد تلاش‌های ناموفق بیش از حد مجاز است*\\.\n\n"
+            f"لطفاً *{mins} دقیقه* صبر کنید و مجدداً تلاش نمایید\\."
+        )
+        await update.effective_chat.send_message(lockout_msg, parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
     args = context.args or []
     if not args:
-        await update.effective_message.reply_text(
+        await update.effective_chat.send_message(
             t("admin_login_usage", lang), parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
     password = args[0].strip()
-    if config.ADMIN_PASSWORD and password == config.ADMIN_PASSWORD:
+
+    # 3. Require strong admin password (min 8 chars) if configured
+    admin_pw = (config.ADMIN_PASSWORD or "").strip()
+    if not admin_pw or len(admin_pw) < 8:
+        logger.warning(
+            "ADMIN_PASSWORD is empty or too short (< 8 chars). In-chat /admin_login is disabled. Use ADMIN_CHAT_IDS."
+        )
+        disabled_msg = (
+            "⚠️ In\\-chat admin password login is disabled\\.\n"
+            "Please configure a strong `ADMIN_PASSWORD` (min 8 chars) or use `ADMIN_CHAT_IDS`\\."
+        )
+        await update.effective_chat.send_message(disabled_msg, parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    # 4. Constant-time comparison to prevent timing attacks
+    if hmac.compare_digest(password, admin_pw):
+        _clear_login_attempts(chat_id)
         admin_user = db.get_user_by_email("admin@bot.local")
         if not admin_user:
             admin_id = db.create_user("admin@bot.local", "in_bot_admin", role="admin")
@@ -825,14 +897,24 @@ async def admin_login_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Instantly transform to Admin View!
         text, kb, mode = _admin_menu_text_and_markup(lang)
         user_name = update.effective_user.first_name or ("مدیر" if lang == "fa" else "Admin")
-        await update.effective_message.reply_text(
-            f"{t('admin_login_success', lang)}\n\n"
-            f"*Welcome, Administrator {escape_md_v2(user_name)}*\n\n" + text,
+        await update.effective_chat.send_message(
+            f"{t('admin_login_success', lang)}\\n\\n"
+            f"*Welcome, Administrator {escape_md_v2(user_name)}*\\n\\n" + text,
             reply_markup=kb,
             parse_mode=mode,
         )
     else:
-        await update.effective_message.reply_text(t("admin_login_invalid", lang))
+        _record_failed_login(chat_id)
+        remaining_attempts = max(0, _MAX_LOGIN_ATTEMPTS - len(_LOGIN_ATTEMPTS.get(chat_id, [])))
+        warn = (
+            f"\\n\\n_Remaining attempts: {remaining_attempts}_"
+            if lang != "fa"
+            else f"\\n\\n_تلاش‌های باقیمانده: {remaining_attempts}_"
+        )
+        await update.effective_chat.send_message(
+            f"{t('admin_login_invalid', lang)}{warn if remaining_attempts > 0 else ''}",
+            parse_mode=ParseMode.MARKDOWN_V2 if remaining_attempts > 0 else None
+        )
 
 
 async def admin_logout_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

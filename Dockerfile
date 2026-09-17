@@ -16,5 +16,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source. .dockerignore keeps .env, .venv, *.db, etc. out of the image.
 COPY . .
 
+# Ensure data directory exists and set non-root ownership
+RUN mkdir -p /app/data && chown -R pwuser:pwuser /app
+
+# Security: Run as non-root pwuser (UID 1000)
+USER pwuser
+
 # Start the Telegram Bot process
 CMD ["python", "bot.py"]

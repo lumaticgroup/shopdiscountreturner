@@ -5,7 +5,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-DB_PATH = os.environ.get("DB_PATH", "discounts.db")
+DB_PATH = os.environ.get("DB_PATH", "")
+if not DB_PATH:
+    if os.path.exists("data/discounts.db"):
+        DB_PATH = "data/discounts.db"
+    elif os.path.exists("discounts.db"):
+        DB_PATH = "discounts.db"
+    else:
+        DB_PATH = "data/discounts.db"
+
+_db_dir = os.path.dirname(DB_PATH)
+if _db_dir:
+    os.makedirs(_db_dir, exist_ok=True)
 
 # Daily digest time (server local time)
 DAILY_DIGEST_HOUR = int(os.environ.get("DAILY_DIGEST_HOUR", "9"))
